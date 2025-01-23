@@ -3,7 +3,7 @@
 #include <string>
 // #include <Eigen/Dense>
 
-namespace param_id {
+namespace deka {
 std::string test();
 
 // inline Eigen::MatrixXd fdbk(

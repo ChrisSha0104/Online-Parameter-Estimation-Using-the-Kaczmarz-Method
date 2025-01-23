@@ -1,8 +1,8 @@
-#include <param_id/lib.hpp>
+#include <deka/lib.hpp>
 #define CATCH_CONFIG_MAIN
 #include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("test_hello_world") {
-  std::string value = param_id::test();
+  std::string value = deka::test();
   REQUIRE(value == std::string("Hello world!"));
 }

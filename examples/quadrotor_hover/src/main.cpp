@@ -1,7 +1,7 @@
-#include <param_id/rls.hpp>
+#include <deka/lib.hpp>
 #include <iostream>
 
 int main() {
-  std::cout << param_id::test() << std::endl;
+  std::cout << deka::test() << std::endl;
   return 0;
 }

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15...3.31)
 
 project(
-  param_id
+  deka
   DESCRIPTION "General parameter identification library."
   VERSION 1.0
   LANGUAGES CXX
@@ -33,7 +33,7 @@ install(
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} # lib
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} # lib
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} # bin
-  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} # include
+  # INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} # include
 )
 
 include(CMakePackageConfigHelpers)
@@ -44,7 +44,7 @@ write_basic_package_version_file(
 )
 
 if(NOT INCLUDE_INSTALL_DIR)
-  set(INCLUDE_INSTALL_DIR include/param_id)
+  set(INCLUDE_INSTALL_DIR include/deka)
 endif()
 
 configure_package_config_file(
@@ -68,6 +68,6 @@ install(
 )
 
 install(
-  DIRECTORY ${PROJECT_SOURCE_DIR}/include
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+  DIRECTORY ${PROJECT_SOURCE_DIR}/include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )

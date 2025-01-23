@@ -1,4 +1,4 @@
-file(GLOB HEADER_LIST CONFIGURE_DEPENDS "${param_id_SOURCE_DIR}/include/param_id/*.hpp")
+file(GLOB HEADER_LIST CONFIGURE_DEPENDS "${deka_SOURCE_DIR}/include/deka/*.hpp")
 
 add_library(${PROJECT_NAME} lib.cpp ${HEADER_LIST})
 
@@ -11,4 +11,4 @@ target_include_directories(
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# target_link_libraries(param_id PRIVATE Eigen3::Eigen)
+# target_link_libraries(${PROJECT_NAME} PRIVATE Eigen3::Eigen)

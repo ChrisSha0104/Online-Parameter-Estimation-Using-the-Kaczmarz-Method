@@ -5,13 +5,13 @@ project(
   LANGUAGES CXX
 )
 
-find_package(param_id CONFIG REQUIRED)
-message("param_id_DIR: ${param_id_DIR}")
-message("param_id_INCLUDE_DIR: ${param_id_INCLUDE_DIR}")
-include_directories(${param_id_INCLUDE_DIR})
+find_package(deka CONFIG REQUIRED)
+message("deka_DIR: ${deka_DIR}")
+message("deka_INCLUDE_DIR: ${deka_INCLUDE_DIR}")
+include_directories(${deka_INCLUDE_DIR})
 
 add_executable(${PROJECT_NAME} src/main.cpp)
-target_link_libraries(${PROJECT_NAME} param_id::param_id)
+target_link_libraries(${PROJECT_NAME} deka::deka)
 
 add_custom_target(
   run
