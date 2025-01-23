@@ -20,17 +20,7 @@ include(GNUInstallDirs)
 # Dependencies
 find_package(Eigen3 REQUIRED NO_MODULE)
 
-# add_subdirectory(src)
-file(GLOB HEADER_LIST CONFIGURE_DEPENDS "${param_id_SOURCE_DIR}/include/${PROJECT_NAME}/*.hpp")
-add_library(${PROJECT_NAME} src/lib.cpp ${HEADER_LIST})
-target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
-target_include_directories(
-  ${PROJECT_NAME}
-  PUBLIC
-  $<BUILD_INTERFACE:${${PROJECT_NAME}_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
-# target_link_libraries(${PROJECT_NAME} PRIVATE Eigen3::Eigen)
+add_subdirectory(src)
 
 if((CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME OR MODERN_CMAKE_BUILD_TESTING) AND BUILD_TESTING)
   add_subdirectory(tests)
