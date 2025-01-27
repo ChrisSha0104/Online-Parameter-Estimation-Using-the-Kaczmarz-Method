@@ -23,7 +23,7 @@ class OnlineParamEst:
         self.quadrotor = Quadrotor()
         self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
 
-    def simulate_quadrotor_hover_with_MPC(self, update_status: str, NSIM: int =200):
+    def simulate_quadrotor_hover_with_MPC(self, update_status: str, NSIM: int =400):
         # initialize quadrotor parameters
         theta = np.array([self.quadrotor.mass,self.quadrotor.g])
 
@@ -55,7 +55,7 @@ class OnlineParamEst:
             # change mass
             if i == changing_step:
                 change_params = True
-                theta = np.array([self.quadrotor.mass + 2,self.quadrotor.g * 2])
+                theta = np.array([self.quadrotor.mass * 4,self.quadrotor.g * 2])
 
             # MPC controller
             if update_status == "immediate_update":
@@ -92,7 +92,7 @@ class OnlineParamEst:
             theta_all.append(theta)
         return x_all, u_all, theta_all
     
-    def simulate_quadrotor_hover_with_RLS(self, NSIM: int =100): #TODO: add RLS parameters here!
+    def simulate_quadrotor_hover_with_RLS(self, NSIM: int =200): #TODO: add RLS parameters here!
         # initialize quadrotor parameters
         theta = np.array([self.quadrotor.mass,self.quadrotor.g])
         theta_hat = np.copy(theta)
@@ -131,7 +131,7 @@ class OnlineParamEst:
         for i in range(NSIM):
             # change mass
             if i == changing_step:
-                theta = np.array([self.quadrotor.mass + 2,self.quadrotor.g * 2])
+                theta = np.array([self.quadrotor.mass * 4,self.quadrotor.g * 2])
             # MPC controller
             x_nom, u_nom = self.quadrotor.get_hover_goals(theta_hat[0], theta_hat[1], self.quadrotor.kt)
             Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta_hat[0], theta_hat[1])
@@ -150,7 +150,7 @@ class OnlineParamEst:
             f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_prev, theta_hat_prev[0], theta_hat_prev[1]) # (num_states, 1)
             b = x_curr - f_at_theta_prev + df_dtheta_at_theta_prev @ theta_hat_prev # (num_states, 1)
 
-            # import pdb; pdb.set_trace()
+            print(x_curr - f_at_theta_prev, "at step: ", i)
             rls.update(df_dtheta_at_theta_prev, b)
             theta_hat = np.copy(rls.predict().reshape(2))
 
@@ -176,7 +176,7 @@ class OnlineParamEst:
 
         if args.method == "Naive_MPC":
             ParamEst = OnlineParamEst()
-            update_status = "late_update"
+            update_status = "immediate_update"
             x_history, u_history, theta_history = ParamEst.simulate_quadrotor_hover_with_MPC(update_status)
             title = "g*=2, m+=2 at t=50 Naive MPC with update status: " + update_status
             visualize_trajectory_hover(x_history, u_history, theta_history, title)
@@ -185,6 +185,8 @@ class OnlineParamEst:
             x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_RLS()
             title = "g*=2, m+=2 at t=50 with RLS"
             visualize_trajectory_hover_with_est(x_history, u_history, theta_history, theta_hat_history, title)
+        else:
+            print("Invalid method. Choose from Naive_MPC, KM, RLS, EKF")
 
 if __name__ == "__main__":
     OnlineParamEst.main()

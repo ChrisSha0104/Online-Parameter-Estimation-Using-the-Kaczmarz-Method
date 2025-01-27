@@ -129,7 +129,6 @@ class Quadrotor():
 
         return self.Anp, self.Bnp
     
-
-
+    # TODO: add this method
     def perturb_initial_state(self):
         pass
