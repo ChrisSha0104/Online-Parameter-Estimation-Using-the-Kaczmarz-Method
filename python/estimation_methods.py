@@ -16,13 +16,13 @@ class RLS:
         self.P = np.eye(num_params) * 1e6  # Large initial covariance #TODO: use A and b to initialize P
         self.x = np.zeros((num_params, 1))
 
-    # def initialize(self, A0, b0):
-    #     """
-    #     Initialize P and x based on the initial data.
+    def initialize(self, A0, b0):
+        """
+        Initialize P and x based on the initial data.
 
-    #     """
-    #     self.P = np.linalg.inv(A0.T @ A0)  # Initial covariance matrix
-    #     self.x = self.P @ (A0.T @ b0)      # Initial parameter estimate
+        """
+        self.P = np.linalg.inv(A0.T @ A0)  # Initial covariance matrix
+        self.x = (self.P @ (A0.T @ b0)).reshape(-1,1)     # Initial parameter estimate
 
     def update(self, A, b):
         """
