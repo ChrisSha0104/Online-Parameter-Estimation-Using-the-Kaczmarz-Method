@@ -1,6 +1,16 @@
-file(GLOB HEADER_LIST CONFIGURE_DEPENDS "${deka_SOURCE_DIR}/include/deka/*.hpp")
+set(
+  HEADER_LIST
+  "${deka_SOURCE_DIR}/include/deka/solvers.hpp"
+  "${deka_SOURCE_DIR}/include/deka/util.hpp"
+)
 
-add_library(${PROJECT_NAME} lib.cpp ${HEADER_LIST})
+set(
+  IMPL_LIST
+  "util.cpp"
+  "solvers.cpp"
+)
+
+add_library(${PROJECT_NAME} ${IMPL_LIST} ${HEADER_LIST})
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 
@@ -11,4 +21,4 @@ target_include_directories(
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# target_link_libraries(${PROJECT_NAME} PRIVATE Eigen3::Eigen)
+target_link_libraries(${PROJECT_NAME} PUBLIC Eigen3::Eigen)

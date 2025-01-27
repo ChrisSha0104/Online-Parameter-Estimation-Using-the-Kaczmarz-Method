@@ -6,12 +6,14 @@ project(
 )
 
 find_package(deka CONFIG REQUIRED)
+find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(autodiff REQUIRED)
+
 message("deka_DIR: ${deka_DIR}")
 message("deka_INCLUDE_DIR: ${deka_INCLUDE_DIR}")
-include_directories(${deka_INCLUDE_DIR})
 
 add_executable(${PROJECT_NAME} src/main.cpp)
-target_link_libraries(${PROJECT_NAME} deka::deka)
+target_link_libraries(${PROJECT_NAME} deka::deka Eigen3::Eigen autodiff::autodiff)
 
 add_custom_target(
   run
