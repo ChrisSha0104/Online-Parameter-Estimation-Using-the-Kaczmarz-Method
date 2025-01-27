@@ -1,7 +1,7 @@
-#include <deka/lib.hpp>
+#include <deka/util.hpp>
 #include <iostream>
 
 int main() {
-  std::cout << deka::test() << std::endl;
+  std::cout << deka::util::test() << std::endl;
   return 0;
 }

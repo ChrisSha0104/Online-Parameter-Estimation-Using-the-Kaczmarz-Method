@@ -1,5 +1,8 @@
 # Installation and Usage
 
+## Dependencies
+Some dependencies are installed automatically by CMake via `FetchContent` (e.g. Catch2) but you may still have to install Eigen and autodiff separately in order to build the library.
+
 ## Configuration, Building, Testing, and Installing
 ```bash
   cmake -S . -B build
