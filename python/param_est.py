@@ -120,7 +120,7 @@ class OnlineParamEst:
         theta_all = []
         theta_hat_all = []
 
-        changing_steps = np.random.choice(range(20,180),size=1, replace=False)
+        changing_steps = np.random.choice(range(20,180),size=3, replace=False)
         
 
         df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
@@ -132,7 +132,7 @@ class OnlineParamEst:
         for i in range(NSIM):
             # change mass
             if i in changing_steps:
-                update_scale = np.random.uniform(1/2,2)
+                update_scale = np.random.uniform(1/2,3) # runs into singular if I change scale to [1/3,4]
                 theta = np.array([self.quadrotor.mass*update_scale,self.quadrotor.g*update_scale])
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals(theta_hat[0], theta_hat[1], self.quadrotor.kt)

@@ -1,7 +1,7 @@
 import autograd.numpy as np
 
 class RLS:
-    def __init__(self, num_params, forgetting_factor=0.97):
+    def __init__(self, num_params, forgetting_factor=0.87):
         """
         Initialize the RLS solver.
 
@@ -45,6 +45,7 @@ class RLS:
 
         # Update the covariance matrix
         self.P = (np.eye(num_params) - K @ A @ self.P) / self.forgetting_factor
+        print(self.P)
 
     def predict(self):
         """
