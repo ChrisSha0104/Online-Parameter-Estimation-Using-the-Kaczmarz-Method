@@ -1,23 +1,59 @@
 import autograd.numpy as np
 
 class RLS:
-    def __init__(self, num_params, lambda_factor=0.97):
-        self.num_params = num_params
-        self.lambda_factor = lambda_factor
-        self.theta = 0.                    # Parameter estimate
-        self.P = 1000.                       # Large initial covariance matrix
+    def __init__(self, num_params, forgetting_factor=0.97):
+        """
+        Initialize the RLS solver.
 
-    def update(self, x, y):
-        # Reshape inputs to column vectors
-        x = np.reshape(x, (13, 1))          # TODO: 13 is hard coded! Change this
-        y = np.reshape(y, (13, 1))          # Compute Kalman gain
-        P_x = self.P * x
-        gain_denominator = self.lambda_factor + x.T @ P_x
-        K = P_x / gain_denominator        # Update estimate
-        y_pred = x * self.theta
-        self.theta = self.theta + K.T @ (y - y_pred)        # Update covariance matrix
-        self.P = (self.P - K.T @ x * self.P) / self.lambda_factor
-        return self.theta
+        Args:
+            num_params (int): Number of parameters in x (size of x).
+            forgetting_factor (float): Forgetting factor (lambda) for RLS. Default is 1 (no forgetting).
+        """
+        self.num_params = num_params
+        self.forgetting_factor = forgetting_factor
+
+        # Initialize the covariance matrix (P) and parameter vector (x)
+        self.P = np.eye(num_params) * 1e6  # Large initial covariance #TODO: use A and b to initialize P
+        self.x = np.zeros((num_params, 1))
+
+    # def initialize(self, A0, b0):
+    #     """
+    #     Initialize P and x based on the initial data.
+
+    #     """
+    #     self.P = np.linalg.inv(A0.T @ A0)  # Initial covariance matrix
+    #     self.x = self.P @ (A0.T @ b0)      # Initial parameter estimate
+
+    def update(self, A, b):
+        """
+        Update the RLS estimate using the full matrix A and vector b.
+
+        Args:
+            A (numpy.ndarray): Matrix A with shape (num_states, num_params).
+            b (numpy.ndarray): Vector b with shape (num_states, 1).
+        """
+        num_states, num_params = A.shape
+        b = b.reshape(num_states, 1)
+
+        # Compute the Kalman gain
+        P_A = self.P @ A.T  # Shape (num_params, num_states)
+        gain_denominator = self.forgetting_factor * np.eye(A.shape[0]) + A @ P_A  # Shape (num_states, num_states)
+        K = P_A @ np.linalg.inv(gain_denominator)  # Shape (num_params, num_states)
+
+        # Update the parameter estimate
+        self.x += K @ (b - A @ self.x)  # Shape (num_params, 1)
+
+        # Update the covariance matrix
+        self.P = (np.eye(num_params) - K @ A @ self.P) / self.forgetting_factor
+
+    def predict(self):
+        """
+        Get the current parameter estimate x.
+
+        Returns:
+            numpy.ndarray: The current estimate of x, shape (num_params, 1).
+        """
+        return self.x
     
 class EKF:
     def __init__(self, process_noise=1e-3, measurement_noise=1e-1):

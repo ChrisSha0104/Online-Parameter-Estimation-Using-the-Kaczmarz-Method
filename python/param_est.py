@@ -13,7 +13,7 @@ np.set_printoptions(precision=4, suppress=True)
 from quadrotor_dynamics import Quadrotor
 from LQR_controller import LQRController
 from estimation_methods import RK, RLS, EKF
-from utilities import visualize_trajectory, visualize_trajectory_with_theta, visualize_trajectory_hover
+from utilities import visualize_trajectory, visualize_trajectory_hover_with_est, visualize_trajectory_hover
 
 import argparse
 
@@ -92,89 +92,80 @@ class OnlineParamEst:
             theta_all.append(theta)
         return x_all, u_all, theta_all
     
-    def simulate_quadrotor_hover_with_controller_RK(self, x0, x_nom, u_nom, NSIM = 200):
+    def simulate_quadrotor_hover_with_RLS(self, NSIM: int =100): #TODO: add RLS parameters here!
+        # initialize quadrotor parameters
+        theta = np.array([self.quadrotor.mass,self.quadrotor.g])
+        theta_hat = np.copy(theta)
+
+        # get tasks goals
+        x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], theta[1], self.quadrotor.kt)
+        check_grads(self.quadrotor.quad_dynamics_rk4, modes=['rev'], order=2)(x_nom, u_nom, self.quadrotor.mass, self.quadrotor.g)
+        Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta[0], theta[1])
+        Q, R = self.quadrotor_controller.get_QR_bryson()
+        self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+        # randomly perturb initial state
+        x0 = np.copy(x_nom)
+        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
+        print("Perturbed Intitial State: ")
+        print(x0)
+
+        # get initial control and state
+        u_curr = self.quadrotor_controller.compute(x0, x_nom, u_nom)
+        x_curr = np.copy(x0)
+
         x_all = []
         u_all = []
         theta_all = []
         theta_hat_all = []
-        x_curr = np.copy(x0)
 
-        # initialize
-        mass = self.quadrotor.mass
-        g0 = self.quadrotor.g
-        g_hat = self.quadrotor.g
+        changing_step = 50
 
-        change_params = False
-        u_curr = self.controller(x0, x_nom, u_nom)
+        df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
+        df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
 
-        rk = RK()
+        rls = RLS(num_params=2)
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
             # change mass
-            if i == 50:
-                change_params = True
-                # mass_new = 2*mass
-                g_new = 2*g0
-
+            if i == changing_step:
+                theta = np.array([self.quadrotor.mass + 2,self.quadrotor.g * 2])
             # MPC controller
-            u_nom = (mass*g_hat/self.quadrotor.kt/4)*np.ones(4)
+            x_nom, u_nom = self.quadrotor.get_hover_goals(theta_hat[0], theta_hat[1], self.quadrotor.kt)
+            Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta_hat[0], theta_hat[1])
+            self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
             u_prev = u_curr
-            u_curr = self.controller(x_curr, x_nom, u_nom)
+            u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)
 
-            # print("step: ", i, "\n", "controls: ", u_curr, "\n", "position: ", x_curr[:3])
+            x_prev = x_curr
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta[0], theta[1])
+            print("step: ", i, "\n", "controls: ", u_curr, "\n", "position: ", x_curr[:3], "\n", "theta: ", theta, "\n", "theta_hat: ", theta_hat)
 
-            if change_params:
-                x_prev = x_curr
-                x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, mass, g_new)
-                theta_all.append(g_new)
-                x0 = g_hat
-            else:
-                x_prev = x_curr
-                x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, mass, g0)
-                theta_all.append(g0)
-                x0 = g_hat
+            # estimate parameters
+            theta_hat_prev = theta_hat
+            df_dtheta_at_theta_prev = np.column_stack((df_dm(x_prev, u_prev, theta_hat_prev[0], theta_hat_prev[1]),  # (num_states, num_params)
+                                                       df_dg(x_prev, u_prev, theta_hat_prev[0], theta_hat_prev[1])))
+            f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_prev, theta_hat_prev[0], theta_hat_prev[1]) # (num_states, 1)
+            b = x_curr - f_at_theta_prev + df_dtheta_at_theta_prev @ theta_hat_prev # (num_states, 1)
 
-            # taylor exp
-            df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
+            # import pdb; pdb.set_trace()
+            rls.update(df_dtheta_at_theta_prev, b)
+            theta_hat = np.copy(rls.predict().reshape(2))
 
-            df_dg_at_g0 = df_dg(x_prev, u_prev, mass, g0)
-            f_at_g0 = self.quadrotor.quad_dynamics_rk4(x_prev, u_prev, mass, g0)
-            x_curr_hat = f_at_g0 + df_dg_at_g0 * (g_hat - g0)
-            b = (x_curr - f_at_g0 + df_dg_at_g0 * g0)
-
-            if i == 0 or i == 60:
-                b_all = b.reshape(13,1)
-                df_dg_all = df_dg_at_g0.reshape(13,1)
-            if i >= 1:
-                # import pdb
-                # pdb.set_trace()
-                b_all = np.vstack((b_all, b.reshape(13,1)))
-                df_dg_all = np.vstack((df_dg_all, df_dg_at_g0.reshape(13,1)))
-                g_hat = rk.iterate(df_dg_all, b_all, x0, 1000).item()
-
-            # print("A: ", df_dg_at_g0)
+            # print("A: ", df_dtheta_at_theta_prev)
             # print("b: ", b)
-            if change_params:
-                print("residual: ", np.abs(df_dg_all * g_new - b_all).sum())
-            else:
-                print("residual: ", np.abs(df_dg_all * g0 - b_all).sum())
-
-            print("A:" , df_dg_at_g0)
-            print("b: ", b)
-
-            if change_params:
-                print("step: ", i, "guess: ", g_hat, "gt: ", g_new)
-            else:
-                print("step: ", i, "guess: ", g_hat, "gt: ", g0)
 
             x_curr = x_curr.reshape(x_curr.shape[0]).tolist()
             u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
 
             x_all.append(x_curr)
             u_all.append(u_curr)
-            theta_hat_all.append(g_hat)
-        return x_all, u_all, theta_hat_all, theta_all
+            theta_all.append(theta)
+            theta_hat_all.append(theta_hat)
+
+        return x_all, u_all, theta_all, theta_hat_all
     
     def simulate_with_controller_RLS(self, x0, x_nom, u_nom, NSIM = 300):
         # TODO: change variables, add comments
@@ -251,8 +242,8 @@ class OnlineParamEst:
 
     def main(): 
         parser = argparse.ArgumentParser(description="Example script with command-line arguments")
-        parser.add_argument("--robot", type=str, required=True, help="choose from quadrotor, cartpole, doublependulum")
-        parser.add_argument("--task", type=str, required=True, help="choose from hover, tracking, control") 
+        parser.add_argument("--robot", type=str, required=False, help="choose from quadrotor, cartpole, doublependulum")
+        parser.add_argument("--task", type=str, required=False, help="choose from hover, tracking, control") 
         parser.add_argument("--method", type=str, required=True, help="choose from Naive_MPC, KM, RLS, EKF")  
         args = parser.parse_args()
 
@@ -260,13 +251,13 @@ class OnlineParamEst:
             ParamEst = OnlineParamEst()
             update_status = "late_update"
             x_history, u_history, theta_history = ParamEst.simulate_quadrotor_hover_with_MPC(update_status)
-            title = "doubling parameter at t=50 with update status: " + update_status
+            title = "g*=2, m+=2 at t=50 Naive MPC with update status: " + update_status
             visualize_trajectory_hover(x_history, u_history, theta_history, title)
         if args.method == "RLS":
             ParamEst = OnlineParamEst()
-            x_history, u_history, theta_history = ParamEst.simulate_quadrotor_hover_with_RLS()
-            title = "doubling parameter at t=50 with update status: " + update_status
-            visualize_trajectory_hover(x_history, u_history, theta_history, title)
+            x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_RLS()
+            title = "g*=2, m+=2 at t=50 with RLS"
+            visualize_trajectory_hover_with_est(x_history, u_history, theta_history, theta_hat_history, title)
 
 if __name__ == "__main__":
     OnlineParamEst.main()
