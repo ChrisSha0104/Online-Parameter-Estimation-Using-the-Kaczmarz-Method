@@ -533,7 +533,7 @@ class OnlineParamEst:
         if args.method == "KM":
             ParamEst = OnlineParamEst()
             # x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_RLS()
-            x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_KM()
+            x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_DEKA()
             title = "g*=2, m+=2 at t=50 with DEKA"
             visualize_trajectory_hover_with_est(x_history, u_history, theta_history, theta_hat_history, title)
         else:
