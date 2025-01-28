@@ -89,10 +89,11 @@ class EKF:
         return self.theta
     
 class RK:
-    def __init__(self, alpha=0.99):
+    def __init__(self, alpha=0.99, epsilon=1e-8):
         self.alpha = alpha
+        self.epsilon = epsilon  # Small value to prevent division by zero
 
-    def iterate(self, A, b, x0, num_iterations, tol = 0.01):
+    def iterate(self, A, b, x0, num_iterations, tol=0.01):
         """
         A: (num_states, num_param)
         x: (num_param, 1)
@@ -102,33 +103,52 @@ class RK:
         self.b = b
         self.m = A.shape[0]  # m is the number of rows, n is the number of columns
         self.n = A.shape[1]
-        self.x = np.array([x0]).reshape(self.n,1)  # Initial estimate of solution
-        # print("cond: ",np.linalg.cond(A))
-        # print("A: ", self.A)
-        # print("b: ", self.b)
-        # print("x0: ", self.x)
+        self.x = np.array([x0]).reshape(self.n, 1)  # initial estimate of solution
+
         for _ in range(num_iterations):
             # Compute exponential weighting for the rows
-            row_norms = np.linalg.norm(A,axis=1)**2
-            # probabilities = row_norms / np.sum(row_norms)
-            mask = (row_norms > 1e-6)
-            # print(mask)
-            exponential_weights = mask * np.exp(self.alpha * row_norms)
-            probabilities = exponential_weights / (np.sum(exponential_weights))
-            i = np.random.choice(self.m, p = probabilities)            # Update rule using the selected row
-            # print(i)
-            #print(i)
-            a_i = np.array(self.A[i]) #.reshape(13,1)
-            b_i = np.array(self.b[i])#.reshape(1,13)
+            row_norms = np.linalg.norm(A, axis=1)**2
+
+            # Normalize by subtracting the maximum (robust to large values)
+            row_norms -= np.max(row_norms)
+
+            # Scale by alpha (can be adjusted for better performance)
+            row_norms *= self.alpha
+
+            # Add epsilon to prevent division by zero or log(0)
+            row_norms += self.epsilon
+
+            # Exponentiate (more stable now due to normalization)
+            exponential_weights = np.exp(row_norms)
+
+            # Calculate probabilities (should be stable now)
+            probabilities = exponential_weights / np.sum(exponential_weights)
+
+            # Ensure probabilities sum to 1 (handle potential rounding errors)
+            probabilities /= np.sum(probabilities)
+
+            i = np.random.choice(self.m, p=probabilities.flatten())
+            a_i = np.array(self.A[i]).reshape(1, -1)  # Ensure a_i is a row vector
+            b_i = np.array(self.b[i]).reshape(1, 1)  # Ensure b_i is a column vector
+            
+            # Ensure that a_i has more than one element before calculating the norm
+            if a_i.size > 1:
+                norm_a_i = np.linalg.norm(a_i)
+            else:
+                norm_a_i = np.abs(a_i)  # Fallback for single-element case
+
             residual = np.dot(self.A, self.x) - b
-            # print("A: ", self.A)
-            # print("b", self.b)
-            # print("residual size: ", np.abs(residual).sum())
-            if np.abs(residual).sum()/self.m < tol:
+
+            if np.abs(residual).sum() / self.m < tol:
                 print("tolerance hit")
                 break
-            increment = ((b_i - np.dot(a_i,self.x)) / (np.linalg.norm(a_i)**2))*a_i
-            increment = increment.reshape(self.n,1)
 
+            # Ensure the denominator is not too close to zero before division
+            if norm_a_i > 1e-6:
+                increment = ((b_i - np.dot(a_i, self.x)) / (norm_a_i**2)) * a_i.T
+            else:
+                increment = np.zeros((self.n, 1))
+
+            increment = increment.reshape(self.n, 1)
             self.x = self.x + increment
         return self.x
