@@ -1,28 +1,35 @@
 import autograd.numpy as np
 
 class RLS:
-    def __init__(self, num_params, forgetting_factor=0.87):
+    def __init__(self, num_params, forgetting_factor=0.99, beta=0.95, noise_power=1e-6):
         """
-        Initialize the RLS solver.
+        Initialize the Variable Forgetting Factor RLS solver.
 
         Args:
             num_params (int): Number of parameters in x (size of x).
-            forgetting_factor (float): Forgetting factor (lambda) for RLS. Default is 1 (no forgetting).
+            forgetting_factor (float): Initial forgetting factor λ (default: 0.99).
+            beta (float): Smoothing factor for error power estimation (default: 0.95).
+            noise_power (float): Estimated noise power σ_v^2 (default: small).
         """
         self.num_params = num_params
         self.forgetting_factor = forgetting_factor
-
-        # Initialize the covariance matrix (P) and parameter vector (x)
-        self.P = np.eye(num_params) * 1e6  # Large initial covariance #TODO: use A and b to initialize P
+        self.beta = beta
+        self.sigma_v2 = noise_power  # Estimated noise power
+        
+        # Initialize covariance matrix (P) with a large positive value for stability
+        self.P = np.eye(num_params) * 1e6  
         self.x = np.zeros((num_params, 1))
+
+        # Initialize error power estimate
+        self.sigma_e2 = 1e-6  
 
     def initialize(self, A0, b0):
         """
         Initialize P and x based on the initial data.
-
         """
-        self.P = np.linalg.inv(A0.T @ A0)  # Initial covariance matrix
-        self.x = (self.P @ (A0.T @ b0)).reshape(-1,1)     # Initial parameter estimate
+        reg = 1e-6 * np.eye(A0.shape[1])  # Regularization for stability
+        self.P = np.linalg.inv(A0.T @ A0 + reg)  
+        self.x = (self.P @ (A0.T @ b0)).reshape(-1,1)
 
     def update(self, A, b):
         """
@@ -35,17 +42,23 @@ class RLS:
         num_states, num_params = A.shape
         b = b.reshape(num_states, 1)
 
-        # Compute the Kalman gain
+        # Compute a priori error
+        e = b - A @ self.x  # Shape (num_states, 1)
+
+        # Compute Kalman gain
         P_A = self.P @ A.T  # Shape (num_params, num_states)
         gain_denominator = self.forgetting_factor * np.eye(A.shape[0]) + A @ P_A  # Shape (num_states, num_states)
         K = P_A @ np.linalg.inv(gain_denominator)  # Shape (num_params, num_states)
 
-        # Update the parameter estimate
-        self.x += K @ (b - A @ self.x)  # Shape (num_params, 1)
+        # Update parameter estimate
+        self.x += K @ e  # Shape (num_params, 1)
 
-        # Update the covariance matrix
-        self.P = (np.eye(num_params) - K @ A @ self.P) / self.forgetting_factor
-        print(self.P)
+        # Update covariance matrix (fixed formula)
+        self.P = (self.P - K @ A @ self.P) / self.forgetting_factor
+
+        # Update power estimates and forgetting factor
+        self.sigma_e2 = self.beta * self.sigma_e2 + (1 - self.beta) * np.linalg.norm(e)**2
+        self.forgetting_factor = 1 - (self.sigma_v2 / self.sigma_e2)
 
     def predict(self):
         """
