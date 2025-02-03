@@ -11,6 +11,8 @@ np.set_printoptions(precision=4, suppress=True)
 # Note: autograd does not work with np.block
 
 from quadrotor_dynamics import Quadrotor
+from double_pendulum_dynamics import DoublePendulum
+from double_pen_LQR import LQRController_pen
 from LQR_controller import LQRController
 from estimation_methods import RK, RLS, EKF
 from utilities import visualize_trajectory, visualize_trajectory_hover_with_est, visualize_trajectory_hover
@@ -22,6 +24,8 @@ class OnlineParamEst:
         # Quadrotor Tasks:
         self.quadrotor = Quadrotor()
         self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
+        self.double_pendulum =  DoublePendulum() 
+        self.double_pendulum_controller = LQRController_pen()
 
     def simulate_quadrotor_hover_with_MPC(self, update_status: str, NSIM: int =400):
         # initialize quadrotor parameters
@@ -522,7 +526,74 @@ class OnlineParamEst:
             theta_hat_all.append(theta_hat)
 
         return x_all, u_all, theta_hat_all, theta_all
+    def simulate_pendulum_with_MPC(self, update_status: str, NSIM: int =400):
+        # initialize quadrotor parameters
+        theta = np.array([self.double_pendulum.m1,self.double_pendulum.g])
+        #TODO continue to modify double pendulum
+        # get tasks goals
+        x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], theta[1], self.quadrotor.kt)
+        check_grads(self.quadrotor.quad_dynamics_rk4, modes=['rev'], order=2)(x_nom, u_nom, self.quadrotor.mass, self.quadrotor.g)
+        Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta[0], theta[1])
+        Q, R = self.quadrotor_controller.get_QR_bryson()
+        self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
 
+        # randomly perturb initial state
+        x0 = np.copy(x_nom)
+        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
+        print("Perturbed Intitial State: ")
+        print(x0)
+
+        x_all = []
+        u_all = []
+        theta_all = []
+
+        x_curr = np.copy(x0)
+
+        change_params = False
+        changing_step = 50
+
+        # simulate the dynamics with the LQR controller
+        for i in range(NSIM):
+            # change mass
+            if i == changing_step:
+                change_params = True
+                theta = np.array([self.quadrotor.mass * 4,self.quadrotor.g * 2])
+
+            # MPC controller
+            if update_status == "immediate_update":
+                if i == changing_step:
+                    x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], theta[1], self.quadrotor.kt)
+                    Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta[0], theta[1])
+                    self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+                u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)
+            elif update_status == "never_update":
+                u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)
+            elif update_status == "late_update":
+                if i == changing_step+10: # when to tell controller the right parameters
+                    x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], theta[1], self.quadrotor.kt)
+                    Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta[0], theta[1])
+                    self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+                u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)
+            else:
+                print("invalid update status. Choose from 'immediate_update', 'never_update', or 'late_update'.")
+                exit()
+
+            print("step: ", i, "\n", "controls: ", u_curr, "\n", "position: ", x_curr[:3])
+
+            # postponing the dynamics model by telling it the correct parameters after several steps
+            if change_params:
+                x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta[0], theta[1])
+            else:
+                x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta[0], theta[1])
+
+            x_curr = x_curr.reshape(x_curr.shape[0]).tolist()
+            u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
+
+            x_all.append(x_curr)
+            u_all.append(u_curr)
+            theta_all.append(theta)
+        return x_all, u_all, theta_all
 
     def main(): 
         parser = argparse.ArgumentParser(description="Example script with command-line arguments")
