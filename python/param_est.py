@@ -120,8 +120,7 @@ class OnlineParamEst:
         theta_all = []
         theta_hat_all = []
 
-        changing_steps = np.random.choice(range(20,180),size=3, replace=False)
-        
+        changing_steps = np.random.choice(range(20,180),size=2, replace=False)
 
         df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
         df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
@@ -297,8 +296,11 @@ class OnlineParamEst:
 
         rk = RK()     
 
-        changing_steps = np.random.choice(range(20, 180), size=3, replace=False)
-        
+        changing_steps = np.random.choice(range(20, 180), size=5, replace=False) # TODO: avoid frequent/consecutive changes
+
+        debug: bool = False
+        debug_history_length = 0
+
         # Priority queue for history (fixed size)
         queue_size = 20
         df_dtheta_queue, b_queue = deque(maxlen=queue_size), deque(maxlen=queue_size)
@@ -310,9 +312,11 @@ class OnlineParamEst:
         for i in range(NSIM):
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(1 / 2, 3)
-                theta = np.array([self.quadrotor.mass * update_scale, self.quadrotor.g * update_scale])
+                mass_update_scale = np.random.uniform(1, 3)
+                gravity_update_scale = np.random.uniform(1, 3)
+                theta = np.array([self.quadrotor.mass * mass_update_scale, self.quadrotor.g * gravity_update_scale])
                 theta_all.append(theta)
+                # debug_history_length = 4
 
             # update goals based on the estimated states
             x_nom, u_nom = self.quadrotor.get_hover_goals(theta_hat[0], theta_hat[1], self.quadrotor.kt)
@@ -328,28 +332,37 @@ class OnlineParamEst:
 
             # estimate parameters
             theta_hat_prev = theta_hat
-            df_dtheta_at_theta_prev = np.column_stack((df_dm(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]),
+            df_dtheta_at_theta_prev = np.column_stack((df_dm(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]), # = A
                                                     df_dg(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])))
             f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])
             b = x_curr - f_at_theta_prev + df_dtheta_at_theta_prev @ theta_hat_prev
 
             if i == 0:
                 theta_hat_prev = theta_hat
+                theta_km = theta_hat
             else:
                 # Add new data to the queues
-                df_dtheta_queue.append(df_dtheta_at_theta_prev)
-                b_queue.append(b.reshape(-1,1))
+                # df_dtheta_queue.append(df_dtheta_at_theta_prev)
+                # b_queue.append(b.reshape(-1,1))
 
                 # Use the regular Kaczmarz method (no entropy-based selection)
                 theta_hat_prev = theta_hat
-                theta_hat = rk.iterate(np.vstack(df_dtheta_queue), np.vstack(b_queue), theta_hat_prev.reshape(-1,1), 1000, 0.01).reshape(2)
+                # theta_hat = rk.iterate(df_dtheta_queue, b_queue, theta_hat_prev.reshape(-1,1), 100, 0.01).reshape(2)
+                theta_km = rk.iterate(df_dtheta_at_theta_prev, b, theta_hat_prev.reshape(-1,1), 1000, 0.001).reshape(2)
+                theta_hat = np.linalg.lstsq(df_dtheta_at_theta_prev, b)[0]
+
+                if debug_history_length>0:
+                    print("A: ", df_dtheta_at_theta_prev)
+                    print("b: ", b.T)
+                    print("gt residual: ", np.linalg.norm(np.dot(df_dtheta_at_theta_prev,theta)-b))
+                    debug_history_length -= 1
 
             print("step: ", i, "\n",
-                  "u_k: ", u_curr, "\n",
-                  "x_k: ", x_prev[:3], "\n",
+                #   "u_k: ", u_curr, "\n",
+                #   "x_k: ", x_prev[:3], "\n",
                   "theta_k: ", theta, "\n",
-                  "theta_hat_k: ", theta_hat, "\n",
-                  "x_k+1: ", x_curr[:3],
+                  "theta_km: ", theta_km, "\n",
+                  "theta_lstsq: ", theta_hat
                   )
 
             x_curr = x_curr.reshape(x_curr.shape[0]).tolist()
@@ -522,19 +535,25 @@ class OnlineParamEst:
             ParamEst = OnlineParamEst()
             update_status = "immediate_update"
             x_history, u_history, theta_history = ParamEst.simulate_quadrotor_hover_with_MPC(update_status)
-            title = "g*=2, m+=2 at t=50 Naive MPC with update status: " + update_status
+            title = "Online Parameter Estimation with Naive MPC; update status - " + update_status 
             visualize_trajectory_hover(x_history, u_history, theta_history, title)
-        if args.method == "RLS":
+        elif args.method == "RLS":
             ParamEst = OnlineParamEst()
             # x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_RLS()
             x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_RLS_dynamical()
-            title = "g*=2, m+=2 at t=50 with RLS"
+            title = "Online Parameter Estimation with RLS"
             visualize_trajectory_hover_with_est(x_history, u_history, theta_history, theta_hat_history, title)
-        if args.method == "KM":
+        elif args.method == "KM":
+            ParamEst = OnlineParamEst()
+            # x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_RLS()
+            x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_KM()
+            title = "Online Parameter Estimation with KM"
+            visualize_trajectory_hover_with_est(x_history, u_history, theta_history, theta_hat_history, title)
+        elif args.method == "DEKA":
             ParamEst = OnlineParamEst()
             # x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_RLS()
             x_history, u_history, theta_history, theta_hat_history = ParamEst.simulate_quadrotor_hover_with_DEKA()
-            title = "g*=2, m+=2 at t=50 with DEKA"
+            title = "Online Parameter Estimation with DEKA"
             visualize_trajectory_hover_with_est(x_history, u_history, theta_history, theta_hat_history, title)
         else:
             print("Invalid method. Choose from Naive_MPC, KM, RLS, EKF")

@@ -276,9 +276,10 @@ class TestDEKA(unittest.TestCase):
         self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
 
     def test_random_system(self):
-        A = np.random.rand(5, 3)
-        b = np.random.rand(5, 1)
-        x0 = np.zeros((3, 1))
+        A = np.random.rand(10, 5)
+        x = np.random.rand(5, 1)
+        b = np.dot(A, x)
+        x0 = np.zeros((5, 1))
         deka = DEKA()
         x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
         self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
