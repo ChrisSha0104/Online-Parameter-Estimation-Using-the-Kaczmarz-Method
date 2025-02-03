@@ -12,7 +12,7 @@ from simulator import Sim
 
 class DoublePendulum():
     def __init__(self):
-        self.sim - Sim()
+        self.sim = Sim()
         self.g = 9.81
         self.m1 = 1.0
         self.m2 = 1.0

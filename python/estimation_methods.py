@@ -89,7 +89,7 @@ class EKF:
         # Ensure x and y are column vectors
         x = np.reshape(x, (13, 1))
         y = np.reshape(y, (13, 1))
-        print(x,y)
+        # print(x,y)
         # Innovation covariance
         S = (x @ (self.P * x.T)) + self.R
         # Kalman gain
@@ -97,7 +97,7 @@ class EKF:
 
         # Update state estimate
         self.theta = self.theta + (K @ y).item()
-        print(self.theta)
+        # print(self.theta)
         # Update covariance
         self.P = self.P - (K @ S @ K.T).item()
         return self.theta
