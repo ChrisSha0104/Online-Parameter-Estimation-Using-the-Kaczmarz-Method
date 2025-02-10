@@ -68,12 +68,20 @@ class Quadrotor():
     def qtorp(self, q):
         return q[1:4]/q[0]
     
-    def delta_x_quat(self, x_curr, x_nom=None):
-        if not x_nom:
-            x_nom = self.xg
+    def delta_x_quat(self, x_curr, x_nom):
         q = x_curr[3:7]
-        phi = self.qtorp(self.L(self.qg).T @ q)
-        delta_x = np.hstack([x_curr[0:3]-self.rg, phi, x_curr[7:10]-self.vg, x_curr[10:13]-self.omgg])
+        q_nom = x_nom[3:7]
+
+        # Compute the relative quaternion
+        phi = self.qtorp(self.L(q_nom).T @ q)
+
+        # Compute the state deviation
+        delta_x = np.hstack([
+            x_curr[0:3] - x_nom[0:3],  # Position deviation
+            phi,                       # Orientation deviation
+            x_curr[7:10] - x_nom[7:10],  # Linear velocity deviation
+            x_curr[10:13] - x_nom[10:13] # Angular velocity deviation
+        ])
         return delta_x
 
     def E(self, q):
@@ -122,6 +130,8 @@ class Quadrotor():
     
     #TODO: add kt as param?
     def get_linearized_dynamics(self, xg, uhover, mass, g):
+        self.rg = np.array([0.0, 0, 0.0])
+        self.qg = np.array([1.0, 0, 0, 0])
         Anp = self.A_jac(xg, uhover, mass, g)
         Bnp = self.B_jac(xg, uhover, mass, g)
         self.Anp = self.E(self.qg).T @ Anp @ self.E(self.qg)

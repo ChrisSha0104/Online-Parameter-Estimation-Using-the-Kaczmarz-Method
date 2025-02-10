@@ -35,5 +35,5 @@ class LQRController():
     # LQR controller, input is 13x1 state vector
     def compute(self, x_curr, x_nom, u_nom):
         K_lqr, P_lqr = self.dlqr(self.Anp, self.Bnp, self.Q, self.R)
-        delta_x = self.delta_x_quat(x_curr)
+        delta_x = self.delta_x_quat(x_curr, x_nom)
         return u_nom - K_lqr @ delta_x
