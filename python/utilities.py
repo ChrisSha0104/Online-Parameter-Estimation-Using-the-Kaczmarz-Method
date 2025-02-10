@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import autograd.numpy as np
 
-@staticmethod
 def visualize_trajectory(x_all, u_all, theta_all, title):
     # Set up the figure and axis for plotting
     fig, ax = plt.subplots(3, 1)
@@ -37,7 +36,6 @@ def visualize_trajectory(x_all, u_all, theta_all, title):
     plt.suptitle(title)
     plt.show()
 
-@staticmethod
 def visualize_trajectory_with_est(x_all, u_all, theta_all, theta_hat_all, title):
     # Set up the figure and axis for plotting
     fig, ax = plt.subplots(4, 1)
