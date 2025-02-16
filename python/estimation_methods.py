@@ -2,22 +2,70 @@ import autograd.numpy as np
 import unittest
 
 class RLS:
-    def __init__(self, num_params, forgetting_factor=0.98):
-        self.P = np.eye(num_params) * 1000  # Large initial covariance
-        self.theta_hat = np.zeros((num_params, 1))
+    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.98, c=1000):
+        """
+        :param num_params: Number of parameters to estimate.
+        :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
+        :param forgetting_factor: Forgetting factor (typically referred to as lambda).
+        :param c: Constant factor for initial covariance matrix scale.
+        """
+        self.n = num_params
+        self.P = np.eye(num_params) * c
+        self.theta_hat = theta_hat if theta_hat is not None else np.zeros((num_params, 1))
         self.lambda_ = forgetting_factor
 
     def update(self, A, b):
-        """Update rule for RLS with forgetting factor"""
-        A = np.atleast_2d(A)  # Ensure A is a matrix
-        b = np.atleast_2d(b).reshape(-1, 1)  # Ensure b is a column vector
+        """
+        :param A: Jacobian of system w.r.t. parameters.
+        :param b: Measurement vector.
+        """
+        K = self.P * A.T * np.linalg.inv(A * self.P * A.T + self.lambda_ * np.eye(A.shape[0]))
 
-        K = self.P @ A.T @ np.linalg.inv(A @ self.P @ A.T + self.lambda_ * np.eye(A.shape[0]))
         self.theta_hat += K @ (b - A @ self.theta_hat)
-        self.P = (self.P - K @ A @ self.P) / self.lambda_  # Forget old data
+        self.P = (self.P - K * A * self.P) / self.lambda_
 
     def predict(self):
+        """Note: always call update() first to get updated theta."""
         return self.theta_hat
+
+
+class AdaptiveLambdaRLS:
+    """
+    RLS with adaptive forgetting factor (lambda).
+
+        lambda = 1 - alpha / (1 + ||b - A * theta||)
+
+    Adjusts lambda such that forgetting is reduced when parameters are stable and increased when changing.
+    """
+    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.98, alpha=0.01, c=1000):
+        """
+        :param num_params: Number of parameters to estimate.
+        :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
+        :param forgetting_factor: Forgetting factor (typically referred to as lambda).
+        :param forgetting_adaptation: Tuning factor for adaptive forgetting.
+        :param c: Constant factor for initial covariance matrix scale.
+        """
+        self.n = num_params
+        self.P = np.eye(num_params) * c
+        self.theta_hat = theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        self.lambda_ = forgetting_factor
+        self.alpha = alpha
+
+    def update(self, A, b):
+        """
+        :param A: Jacobian of system w.r.t. parameters.
+        :param b: Measurement vector.
+        """
+        K = self.P * A.T * np.linalg.inv(A * self.P * A.T + self.lambda_ * np.eye(A.shape[0]))
+
+        self.theta_hat += K @ (b - A @ self.theta_hat)
+        self.P = (self.P - K * A * self.P) / self.lambda_
+        self.lambda_ = 1 - self.alpha / (1 + np.linalg.norm(b - A @ self.theta_hat))
+
+    def predict(self):
+        """Note: always call update() first to get updated theta."""
+        return self.theta_hat
+
 
 # class RLS:
 #     def __init__(self, num_params, forgetting_factor=0.95, beta=0.95, noise_power=1e-6):
@@ -119,6 +167,43 @@ class EKF:
         # Update covariance
         self.P = self.P - (K @ S @ K.T).item()
         return self.theta
+
+# class ErrorStateEKF:
+#     def __init__(self, x_nom, theta, P, Q, R):
+#         """
+#         :param x_nom: Nominal state vector (n, 1)
+#         :param theta: Parameter vector (p, 1)
+#         :param P: Error covariance matrix (n+p, n+p)
+#         :param Q: Process noise covariance (n+p, n+p)
+#         :param R: Measurement noise covariance (m, m)            
+#         """
+#         self.x_nominal = np.array(x_nom, dtype=float)
+#         self.theta = np.array(theta, dtype=float)
+#         self.P = np.array(P, dtype=float)
+#         self.Q = np.array(Q, dtype=float)
+#         self.R = np.array(R, dtype=float)
+#         self.n = self.x_nominal.shape[0]
+#         self.p = self.theta.shape[0]
+
+#     def predict(self, x_pred, F, G):
+#         """
+#         :param x_pred: Predicted state (n, 1) from prev. state, control, and model
+#         :param F: State transition Jacobian
+#         :param G: Parameter transition Jacobian
+#         """
+
+#         phi = np.block([
+#             [F, G],
+#             [np.zeros((self.p, self.n)), np.eye(self.p)]
+#         ])
+
+#         self.P = phi @ self.P @ phi.T  + self.Q
+
+#     def update(self, A, b, x):
+#         """
+#         :param A: Jacobian w.r.t. parameters
+#         """
+#         pass
     
 class RK:
     def __init__(self, alpha=0.99, epsilon=1e-8):
