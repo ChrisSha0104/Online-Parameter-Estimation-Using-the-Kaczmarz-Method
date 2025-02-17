@@ -163,74 +163,72 @@ class AdaptiveLambdaRLS:
 #         """
 #         return self.x
     
+# class EKF:
+#     def __init__(self, process_noise=1e-3, measurement_noise=1e-1):
+#         self.theta =0.                    # Initial gravity estimate
+#         self.P = 100.0                       # Initial covariance
+#         self.Q = process_noise                # Process noise covariance
+#         self.R = np.eye(13) * measurement_noise  # Measurement noise covariance
+
+#     def predict(self):
+#         # Prediction step
+#         self.P = self.P + self.Q
+
+#     def update(self, x, y):
+#         """
+#         x: 13x1 Jacobian vector (sensitivity of dynamics to gravity)
+#         y: 13x1 observation vector (state differences)
+#         """
+#         # Ensure x and y are column vectors
+#         x = np.reshape(x, (13, 1))
+#         y = np.reshape(y, (13, 1))
+#         # print(x,y)
+#         # Innovation covariance
+#         S = (x @ (self.P * x.T)) + self.R
+#         # Kalman gain
+#         K = (self.P * x.T) @ np.linalg.inv(S)  # K is 1x13
+
+#         # Update state estimate
+#         self.theta = self.theta + (K @ y).item()
+#         # print(self.theta)
+#         # Update covariance
+#         self.P = self.P - (K @ S @ K.T).item()
+#         return self.theta
+
 class EKF:
-    def __init__(self, process_noise=1e-3, measurement_noise=1e-1):
-        self.theta =0.                    # Initial gravity estimate
-        self.P = 100.0                       # Initial covariance
-        self.Q = process_noise                # Process noise covariance
-        self.R = np.eye(13) * measurement_noise  # Measurement noise covariance
+    """
+    Basic Extended Kalman Filter
+
+    Assumes that the process noise and measurement noise are known, and that their Jacobians are I. Additionally, the process model jacobian is assumed to be I.
+    """
+    def __init__(self, num_params, process_noise, measurement_noise, theta_hat=None, c=1000):
+        """
+        :param num_params: Number of parameters to estimate (p).
+        :param theta_hat: Initial estimate of parameters, otherwise set to zeros (p x 1 vector).
+        :param forgetting_factor: Forgetting factor (typically referred to as lambda).
+        :param c: Constant factor for initial covariance matrix scale.
+        :param P: Estimation error covariance (p x p matrix)
+        :param Q: Process noise covariance (d x p matrix)
+        :param R: Measurement noise covariance (d x d matrix)
+        """
+        self.n = num_params
+        self.theta_hat = theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        self.P = np.eye(num_params) * c
+        self.Q = process_noise
+        self.R = measurement_noise
+
+    def update(self, A, b):
+        """
+        :param A: Jacobian of system w.r.t. parameters (d x p matrix).
+        :param b: Measurement vector (d x 1 vector).
+        """
+        self.P += self.Q
+        K = self.P @ A.T @ np.linalg.inv(A @ self.P @ A.T + self.R)
+        self.theta_hat += K @ (b - A @ self.theta_hat)
+        self.P -= K @ A @ self.P
 
     def predict(self):
-        # Prediction step
-        self.P = self.P + self.Q
-
-    def update(self, x, y):
-        """
-        x: 13x1 Jacobian vector (sensitivity of dynamics to gravity)
-        y: 13x1 observation vector (state differences)
-        """
-        # Ensure x and y are column vectors
-        x = np.reshape(x, (13, 1))
-        y = np.reshape(y, (13, 1))
-        # print(x,y)
-        # Innovation covariance
-        S = (x @ (self.P * x.T)) + self.R
-        # Kalman gain
-        K = (self.P * x.T) @ np.linalg.inv(S)  # K is 1x13
-
-        # Update state estimate
-        self.theta = self.theta + (K @ y).item()
-        # print(self.theta)
-        # Update covariance
-        self.P = self.P - (K @ S @ K.T).item()
-        return self.theta
-
-# class ErrorStateEKF:
-#     def __init__(self, x_nom, theta, P, Q, R):
-#         """
-#         :param x_nom: Nominal state vector (n, 1)
-#         :param theta: Parameter vector (p, 1)
-#         :param P: Error covariance matrix (n+p, n+p)
-#         :param Q: Process noise covariance (n+p, n+p)
-#         :param R: Measurement noise covariance (m, m)            
-#         """
-#         self.x_nominal = np.array(x_nom, dtype=float)
-#         self.theta = np.array(theta, dtype=float)
-#         self.P = np.array(P, dtype=float)
-#         self.Q = np.array(Q, dtype=float)
-#         self.R = np.array(R, dtype=float)
-#         self.n = self.x_nominal.shape[0]
-#         self.p = self.theta.shape[0]
-
-#     def predict(self, x_pred, F, G):
-#         """
-#         :param x_pred: Predicted state (n, 1) from prev. state, control, and model
-#         :param F: State transition Jacobian
-#         :param G: Parameter transition Jacobian
-#         """
-
-#         phi = np.block([
-#             [F, G],
-#             [np.zeros((self.p, self.n)), np.eye(self.p)]
-#         ])
-
-#         self.P = phi @ self.P @ phi.T  + self.Q
-
-#     def update(self, A, b, x):
-#         """
-#         :param A: Jacobian w.r.t. parameters
-#         """
-#         pass
+        return self.theta_hat
     
 class RK:
     def __init__(self, alpha=0.99, epsilon=1e-8):
