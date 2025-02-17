@@ -589,8 +589,8 @@ class OnlineParamEst:
         for i in range(NSIM):
             # Change system parameters at specific step
             if i in changing_steps:
-                mass_update_scale = np.random.uniform(0.8, 1.3)
-                gravity_update_scale = np.random.uniform(0.8, 1.3)
+                mass_update_scale = np.random.uniform(0.5, 2.)
+                gravity_update_scale = np.random.uniform(0.9, 1.1)
                 theta = np.array([self.quadrotor.mass * mass_update_scale, self.quadrotor.g * gravity_update_scale])
 
             # update goals
@@ -633,8 +633,8 @@ class OnlineParamEst:
                   "u_k: ", u_curr, "\n",
                   "x_k: ", x_prev[:3], "\n",
                   "theta_k: ", theta, "\n",
-                #   "theta_km: ", theta_km, "\n",
                   "theta_lstsq: ", theta_hat, "\n",
+                  "delta_theta: ", delta_theta_hat, "\n"
                   )
             
             x_curr = x_curr.reshape(x_curr.shape[0]).tolist()

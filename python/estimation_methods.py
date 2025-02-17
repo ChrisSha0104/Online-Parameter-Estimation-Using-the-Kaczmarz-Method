@@ -353,7 +353,6 @@ class DEKA:
             beta (float): Momentum parameter, typically between 0 and 1.
         """
         self.beta = beta
-        self.alpha = 1
 
     def iterate(self, A, b, x0, num_iterations, tol=0.01):
         """
@@ -398,17 +397,6 @@ class DEKA:
             #     print("A row norm zero")
             #     return x_k
 
-            if np.linalg.norm(residual) < tol:
-                if k < 5:
-                    print("DEKA converged in", k, "iterations")
-                    print(np.linalg.norm(residual))
-                    self.alpha /= 10
-                    return x_k
-                else:
-                    print("DEKA converged in", k, "iterations")
-                    self.alpha /= 10
-                    return x_k 
-
             max_ratio = np.max(np.abs(residual.flatten())**2 / A_row_norms_sq)
             fro_norm_A_sq = np.linalg.norm(A, 'fro')**2
             epsilon_k = 0.5 * (max_ratio / residual_norm_sq + 1 / fro_norm_A_sq)
@@ -436,7 +424,7 @@ class DEKA:
             #     print("DEKA converged in", k, "iterations")
             #     return x_k
 
-            x_next = x_k + self.alpha * (eta_k.T @ residual) / (np.linalg.norm(A_T_eta_k)**2) * A_T_eta_k + self.beta * (x_k - x_prev)
+            x_next = x_k + (eta_k.T @ residual) / (np.linalg.norm(A_T_eta_k)**2) * A_T_eta_k + self.beta * (x_k - x_prev)
 
             # Check for convergence
             # if np.linalg.norm(x_next - x_k) < 0.0001:
@@ -447,8 +435,17 @@ class DEKA:
             x_prev = x_k
             x_k = x_next
 
-        print("DEKA did not converge within", num_iterations, "iterations")
-        self.alpha = 1
+            if k % 10 == 0 and np.linalg.norm(b - A @ x_k) < tol:
+                print("residual new: ", np.linalg.norm(b - A @ x_k))
+                print("residual previous: ", np.linalg.norm(b - A @ x_prev))
+                if k < 10:
+                    print("DEKA converged in", k, "iterations")
+                    return x_k/3
+                else:
+                    print("DEKA converged in", k, "iterations")
+                    return x_k 
+                
+        print("DEKA did not converge within", num_iterations, "iterations, residual: ", np.linalg.norm(b - A @ x_k))
         return x_k
     
 class TestDEKA(unittest.TestCase):
