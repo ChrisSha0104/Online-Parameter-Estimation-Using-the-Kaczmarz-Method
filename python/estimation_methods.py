@@ -318,6 +318,76 @@ class REK:
         return x_k
 
 
+class RKAS:
+    def __init__(self, tol=1e-4, max_iter=1000):
+        """
+        Randomized Kaczmarz with Adaptive Stepsizes (RKAS).
+        :param tol: Convergence tolerance.
+        :param max_iter: Maximum number of iterations.
+        """
+        self.tol = tol
+        self.max_iter = max_iter
+        self.alpha = 0.99
+        self.epsilon = 1e-8
+
+    def solve(self, A, b, x):
+        """
+        Solves the inconsistent system Ax = b using RKAS.
+        :param A: (m x n) coefficient matrix.
+        :param b: (m x 1) right-hand side vector.
+        :return: Approximate solution x.
+        """
+        m, n = A.shape
+        x = np.zeros((n, 1))  # Initial solution x^0 = 0
+        r = -b  # Initial residual r^0 = Ax^0 - b = -b
+
+        # # Compute row selection probabilities
+        # row_norms = np.linalg.norm(A, axis=1) ** 2
+        # probabilities = row_norms / np.sum(row_norms)  # Pr(i_k = i)
+
+        for k in range(self.max_iter):
+                       # Compute exponential weighting for the rows
+            row_norms = np.linalg.norm(A, axis=1)**2
+
+            # Normalize by subtracting the maximum (robust to large values)
+            row_norms -= np.max(row_norms)
+
+            # Scale by alpha (can be adjusted for better performance)
+            row_norms *= self.alpha
+
+            # Add epsilon to prevent division by zero or log(0)
+            row_norms += self.epsilon
+            
+            #Absolute value of row norm
+            row_norms = np.abs(row_norms)
+
+            # Calculate probabilities (should be stable now)
+            probabilities = row_norms / np.sum(row_norms)
+
+            # Ensure probabilities sum to 1 (handle potential rounding errors)
+            probabilities /= np.sum(probabilities)
+
+            # Step 1: Select row index i_k with probability Pr(i_k = i)
+            i_k = np.random.choice(m, p=probabilities)
+
+            # Extract row A_{i_k,:} and corresponding residual component
+            A_ik = A[i_k, :].reshape(1, -1)  # Ensure row vector
+            AAT_ik = np.dot(A, A_ik.T)  # Compute A * A^T for row i_k
+
+            # Step 2: Compute adaptive step size
+            alpha_k = np.dot(AAT_ik.T, r) / np.linalg.norm(AAT_ik) ** 2
+
+            # Step 3: Update solution and residual
+            x = x - alpha_k * A_ik.T
+            r = r - alpha_k * AAT_ik
+
+            # Check for convergence
+            if np.linalg.norm(r) < self.tol:
+                print(f"Converged in {k} iterations")
+                break
+
+        return x
+
 class DEKA:
     def __init__(self, beta=0):
         """
