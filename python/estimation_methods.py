@@ -1,7 +1,35 @@
 import autograd.numpy as np
 import unittest
 
+class LMS:
+    """
+    Basic least mean squares (LMS) method.
+
+    This is a gradient method and implements both normalized and unnormalized approaches.
+    """
+
+    def __init__(self, num_params, theta_hat=None, gain=0.01, normalized=True, bias=1e-6):
+        self.n = num_params
+        self.gamma = gain
+        self.bias = bias
+        self.normalized = True
+        self.theta_hat = theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+
+    def update(self, A, b):
+        Q = np.ones((self.n, 1)) * self.gamma
+
+        if self.normalized:
+            Q /= np.linalg.norm(A, axis=1) ** 2 + self.bias
+
+        K = A @ Q
+        self.theta_hat += K @ (b - A @ self.theta_hat)
+
+    def predict(self):
+        """Note: always call update() first to get updated theta."""
+        return self.theta_hat
+
 class RLS:
+    """RLS with adaptive forgetting factor (lambda)."""
     def __init__(self, num_params, theta_hat=None, forgetting_factor=0.98, c=1000):
         """
         :param num_params: Number of parameters to estimate.
@@ -19,10 +47,9 @@ class RLS:
         :param A: Jacobian of system w.r.t. parameters.
         :param b: Measurement vector.
         """
-        K = self.P * A.T * np.linalg.inv(A * self.P * A.T + self.lambda_ * np.eye(A.shape[0]))
-
+        K = self.P @ A.T @ np.linalg.inv(A @ self.P @ A.T + self.lambda_ * np.eye(A.shape[0]))
         self.theta_hat += K @ (b - A @ self.theta_hat)
-        self.P = (self.P - K * A * self.P) / self.lambda_
+        self.P = (self.P - K @ A @ self.P) / self.lambda_
 
     def predict(self):
         """Note: always call update() first to get updated theta."""
@@ -37,6 +64,7 @@ class AdaptiveLambdaRLS:
 
     Adjusts lambda such that forgetting is reduced when parameters are stable and increased when changing.
     """
+
     def __init__(self, num_params, theta_hat=None, forgetting_factor=0.98, alpha=0.01, c=1000):
         """
         :param num_params: Number of parameters to estimate.
@@ -56,10 +84,9 @@ class AdaptiveLambdaRLS:
         :param A: Jacobian of system w.r.t. parameters.
         :param b: Measurement vector.
         """
-        K = self.P * A.T * np.linalg.inv(A * self.P * A.T + self.lambda_ * np.eye(A.shape[0]))
-
+        K = self.P @ A.T @ np.linalg.inv(A @ self.P @ A.T + self.lambda_ * np.eye(A.shape[0]))
         self.theta_hat += K @ (b - A @ self.theta_hat)
-        self.P = (self.P - K * A * self.P) / self.lambda_
+        self.P = (self.P - K @ A @ self.P) / self.lambda_
         self.lambda_ = 1 - self.alpha / (1 + np.linalg.norm(b - A @ self.theta_hat))
 
     def predict(self):
