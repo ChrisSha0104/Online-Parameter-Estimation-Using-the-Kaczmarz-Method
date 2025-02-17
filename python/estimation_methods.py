@@ -47,6 +47,7 @@ class RLS:
         :param A: Jacobian of system w.r.t. parameters.
         :param b: Measurement vector.
         """
+        # import pdb; pdb.set_trace()
         K = self.P @ A.T @ np.linalg.inv(A @ self.P @ A.T + self.lambda_ * np.eye(A.shape[0]))
         self.theta_hat += K @ (b - A @ self.theta_hat)
         self.P = (self.P - K @ A @ self.P) / self.lambda_
@@ -92,76 +93,6 @@ class AdaptiveLambdaRLS:
     def predict(self):
         """Note: always call update() first to get updated theta."""
         return self.theta_hat
-
-
-# class RLS:
-#     def __init__(self, num_params, forgetting_factor=0.95, beta=0.95, noise_power=1e-6):
-#         """
-#         Initialize the Variable Forgetting Factor RLS solver.
-
-#         Args:
-#             num_params (int): Number of parameters in x (size of x).
-#             forgetting_factor (float): Initial forgetting factor λ (default: 0.99).
-#             beta (float): Smoothing factor for error power estimation (default: 0.95).
-#             noise_power (float): Estimated noise power σ_v^2 (default: small).
-#         """
-#         self.num_params = num_params
-#         self.forgetting_factor = forgetting_factor
-#         self.beta = beta
-#         self.sigma_v2 = noise_power  # Estimated noise power
-        
-#         # Initialize covariance matrix (P) with a large positive value for stability
-#         self.P = np.eye(num_params) * 1e6  
-#         self.x = np.zeros((num_params, 1))
-
-#         # Initialize error power estimate
-#         self.sigma_e2 = 1e-6  
-
-#     def initialize(self, A0, b0):
-#         """
-#         Initialize P and x based on the initial data.
-#         """
-#         reg = 1e-6 * np.eye(A0.shape[1])  # Regularization for stability
-#         self.P = np.linalg.inv(A0.T @ A0 + reg)  
-#         self.x = (self.P @ (A0.T @ b0)).reshape(-1,1)
-
-#     def update(self, A, b):
-#         """
-#         Update the RLS estimate using the full matrix A and vector b.
-
-#         Args:
-#             A (numpy.ndarray): Matrix A with shape (num_states, num_params).
-#             b (numpy.ndarray): Vector b with shape (num_states, 1).
-#         """
-#         num_states, num_params = A.shape
-#         b = b.reshape(num_states, 1)
-
-#         # Compute a priori error
-#         e = b - A @ self.x  # Shape (num_states, 1)
-
-#         # Compute Kalman gain
-#         P_A = self.P @ A.T  # Shape (num_params, num_states)
-#         gain_denominator = self.forgetting_factor * np.eye(A.shape[0]) + A @ P_A  # Shape (num_states, num_states)
-#         K = P_A @ np.linalg.inv(gain_denominator)  # Shape (num_params, num_states)
-
-#         # Update parameter estimate
-#         self.x += K @ e  # Shape (num_params, 1)
-
-#         # Update covariance matrix (fixed formula)
-#         self.P = (self.P - K @ A @ self.P) / self.forgetting_factor
-
-#         # Update power estimates and forgetting factor
-#         self.sigma_e2 = self.beta * self.sigma_e2 + (1 - self.beta) * np.linalg.norm(e)**2
-#         self.forgetting_factor = 1 - (self.sigma_v2 / self.sigma_e2)
-
-#     def predict(self):
-#         """
-#         Get the current parameter estimate x.
-
-#         Returns:
-#             numpy.ndarray: The current estimate of x, shape (num_params, 1).
-#         """
-#         return self.x
     
 class EKF:
     def __init__(self, process_noise=1e-3, measurement_noise=1e-1):
@@ -346,18 +277,16 @@ class REK:
 
 
 class RKAS:
-    def __init__(self, tol=1e-4, max_iter=1000):
+    def __init__(self, alpha=0.99, epsilon=1e-8):
         """
         Randomized Kaczmarz with Adaptive Stepsizes (RKAS).
         :param tol: Convergence tolerance.
         :param max_iter: Maximum number of iterations.
         """
-        self.tol = tol
-        self.max_iter = max_iter
-        self.alpha = 0.99
-        self.epsilon = 1e-8
+        self.alpha = alpha
+        self.epsilon = epsilon
 
-    def solve(self, A, b, x):
+    def solve(self, A, b, x0, max_iter=1000, tol=1e-4):
         """
         Solves the inconsistent system Ax = b using RKAS.
         :param A: (m x n) coefficient matrix.
@@ -365,14 +294,14 @@ class RKAS:
         :return: Approximate solution x.
         """
         m, n = A.shape
-        x = np.zeros((n, 1))  # Initial solution x^0 = 0
+        x = x0.copy()  # Initial solution x^0 = 0
         r = -b  # Initial residual r^0 = Ax^0 - b = -b
 
         # # Compute row selection probabilities
         # row_norms = np.linalg.norm(A, axis=1) ** 2
         # probabilities = row_norms / np.sum(row_norms)  # Pr(i_k = i)
 
-        for k in range(self.max_iter):
+        for k in range(max_iter):
                        # Compute exponential weighting for the rows
             row_norms = np.linalg.norm(A, axis=1)**2
 
@@ -402,17 +331,19 @@ class RKAS:
             AAT_ik = np.dot(A, A_ik.T)  # Compute A * A^T for row i_k
 
             # Step 2: Compute adaptive step size
-            alpha_k = np.dot(AAT_ik.T, r) / np.linalg.norm(AAT_ik) ** 2
+            if np.linalg.norm(AAT_ik) > 1e-6:
+                alpha_k = np.dot(AAT_ik.T, r) / np.linalg.norm(AAT_ik) ** 2
+            else:
+                alpha_k = 0
 
             # Step 3: Update solution and residual
             x = x - alpha_k * A_ik.T
             r = r - alpha_k * AAT_ik
 
             # Check for convergence
-            if np.linalg.norm(r) < self.tol:
+            if np.linalg.norm(r) < tol:
                 print(f"Converged in {k} iterations")
                 break
-
         return x
 
 class DEKA:
@@ -424,6 +355,7 @@ class DEKA:
             beta (float): Momentum parameter, typically between 0 and 1.
         """
         self.beta = beta
+        self.alpha = 1
 
     def iterate(self, A, b, x0, num_iterations, tol=0.01):
         """
@@ -472,9 +404,11 @@ class DEKA:
                 if k < 5:
                     print("DEKA converged in", k, "iterations")
                     print(np.linalg.norm(residual))
-                    return x_k*0
+                    self.alpha /= 10
+                    return x_k
                 else:
                     print("DEKA converged in", k, "iterations")
+                    self.alpha /= 10
                     return x_k 
 
             max_ratio = np.max(np.abs(residual.flatten())**2 / A_row_norms_sq)
@@ -504,7 +438,7 @@ class DEKA:
             #     print("DEKA converged in", k, "iterations")
             #     return x_k
 
-            x_next = x_k + (eta_k.T @ residual) / (np.linalg.norm(A_T_eta_k)**2) * A_T_eta_k + self.beta * (x_k - x_prev)
+            x_next = x_k + self.alpha * (eta_k.T @ residual) / (np.linalg.norm(A_T_eta_k)**2) * A_T_eta_k + self.beta * (x_k - x_prev)
 
             # Check for convergence
             # if np.linalg.norm(x_next - x_k) < 0.0001:
@@ -516,6 +450,7 @@ class DEKA:
             x_k = x_next
 
         print("DEKA did not converge within", num_iterations, "iterations")
+        self.alpha = 1
         return x_k
     
 class TestDEKA(unittest.TestCase):

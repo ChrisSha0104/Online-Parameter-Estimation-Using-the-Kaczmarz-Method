@@ -14,7 +14,7 @@ from quadrotor_dynamics import Quadrotor
 from double_pendulum_dynamics import DoublePendulum
 from double_pen_LQR import LQRController_pen
 from LQR_controller import LQRController
-from estimation_methods import RK, RLS, EKF, DEKA, REK
+from estimation_methods import *
 from utilities import visualize_trajectory, visualize_trajectory_with_est
 
 import argparse
@@ -129,7 +129,7 @@ class OnlineParamEst:
         theta_hat_all = []
 
         changing_steps = [50]#np.random.choice(range(20,180),size=2, replace=False)
-        process_noise_std=np.array([0.00001, 0.0001])
+        process_noise_std=np.zeros((13,1))+0.0001
 
         df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
         df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
@@ -138,9 +138,16 @@ class OnlineParamEst:
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
-            # change mass
-            if i % 10 == 0:
-                theta += np.random.normal(0, process_noise_std, size=theta.shape)
+            # noising the parameters
+            # if i % 10 == 0:
+            #     theta += np.random.normal(0, process_noise_std, size=theta.shape)
+
+            # Change system parameters at specific step
+            if i in changing_steps:
+                mass_update_scale = np.random.uniform(0.8, 1.3)
+                gravity_update_scale = np.random.uniform(0.8, 1.3)
+                theta = np.array([self.quadrotor.mass * mass_update_scale, self.quadrotor.g * gravity_update_scale])
+
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals(theta_hat[0], theta_hat[1], self.quadrotor.kt) #TODO: use moving ave filter?
             Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta_hat[0], theta_hat[1])
@@ -159,7 +166,10 @@ class OnlineParamEst:
             A = np.column_stack((df_dm(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]),  # (num_states, num_params)
                                  df_dg(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])))
             f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]) # (num_states, 1)
-            b = x_curr - f_at_theta_prev # (num_states, 1)
+            b = (x_curr - f_at_theta_prev).reshape(-1,1) # (num_states, 1)
+            
+            if i % 10 == 0:
+                b += np.random.normal(0, process_noise_std, size=b.shape)
 
             # print("normed residual at step: ", i, " is " np.linalg.norm(df_dtheta_at_theta_prev @ theta_hat- b))
             # if i == 0:
@@ -178,6 +188,209 @@ class OnlineParamEst:
                   "theta_hat_k: ", theta_hat, "\n",
                   "delta_theta_hat", delta_theta_hat, "\n",
                 #   "x_k+1: ", x_curr[:3], 
+                  )
+            # print("A: ", A)
+            # print("b: ", b)
+
+            x_curr = x_curr.reshape(x_curr.shape[0]).tolist() #TODO: x one step in front of controls
+            u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
+
+            x_all.append(x_curr)
+            u_all.append(u_curr)
+            theta_all.append(theta)
+            theta_hat_all.append(theta_hat)
+
+        return x_all, u_all, theta_all, theta_hat_all
+    
+    def simulate_quadrotor_hover_with_Adaptive_RLS(self, NSIM: int =200): #TODO: add RLS parameters here!
+        # initialize quadrotor parameters
+        theta = np.array([self.quadrotor.mass,self.quadrotor.g])
+        theta_hat = np.copy(theta)
+
+        # get tasks goals
+        x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], theta[1], self.quadrotor.kt)
+        check_grads(self.quadrotor.quad_dynamics_rk4, modes=['rev'], order=2)(x_nom, u_nom, self.quadrotor.mass, self.quadrotor.g)
+        Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta[0], theta[1])
+        Q, R = self.quadrotor_controller.get_QR_bryson()
+        self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+        # randomly perturb initial state
+        x0 = np.copy(x_nom)
+        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
+        print("Perturbed Intitial State: ")
+        print(x0)
+
+        # get initial control and state
+        u_curr = self.quadrotor_controller.compute(x0, x_nom, u_nom)
+        x_curr = np.copy(x0)
+
+        x_all = []
+        u_all = []
+        theta_all = []
+        theta_hat_all = []
+
+        changing_steps = np.random.choice(range(20,180),size=2, replace=False)
+        process_noise_std=np.zeros((13,1))+0.0001
+
+        df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
+        df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
+
+        rls = AdaptiveLambdaRLS(num_params=2)
+
+        # simulate the dynamics with the LQR controller
+        for i in range(NSIM):
+            # noising the parameters
+            # if i % 10 == 0:
+            #     theta += np.random.normal(0, process_noise_std, size=theta.shape)
+
+            # Change system parameters at specific step
+            if i in changing_steps:
+                mass_update_scale = np.random.uniform(0.8, 1.3)
+                gravity_update_scale = np.random.uniform(0.8, 1.3)
+                theta = np.array([self.quadrotor.mass * mass_update_scale, self.quadrotor.g * gravity_update_scale])
+
+            # update goals
+            x_nom, u_nom = self.quadrotor.get_hover_goals(theta_hat[0], theta_hat[1], self.quadrotor.kt) #TODO: use moving ave filter?
+            Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta_hat[0], theta_hat[1])
+            self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+            # compute controls
+            
+            u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)                    # at t=k
+
+            # step
+            x_prev = x_curr                                                                     # at t=k
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta[0], theta[1])       # at t=k+1
+
+            # estimate parameters
+            theta_hat_prev = theta_hat                                                          # at t=k
+            A = np.column_stack((df_dm(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]),  # (num_states, num_params)
+                                 df_dg(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])))
+            f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]) # (num_states, 1)
+            b = (x_curr - f_at_theta_prev).reshape(-1,1) # (num_states, 1)
+            
+            if i % 10 == 0:
+                b += np.random.normal(0, process_noise_std, size=b.shape)
+
+            # print("normed residual at step: ", i, " is " np.linalg.norm(df_dtheta_at_theta_prev @ theta_hat- b))
+            # if i == 0:
+            #     rls.initialize(df_dtheta_at_theta_prev, b)
+            rls.update(A, b)
+            delta_theta_hat = np.copy(rls.predict().reshape(2))                                       # at t=k+1
+            
+            # using LSQ SOLN
+            # delta_theta_hat = np.linalg.lstsq(A,b)[0].reshape(2)
+            theta_hat = delta_theta_hat + theta_hat_prev
+
+            print("step: ", i, "\n", 
+                  "u_k: ", u_curr, "\n", 
+                  "x_k: ", x_prev[:3], "\n", 
+                  "theta_k: ", theta, "\n", 
+                  "theta_hat_k: ", theta_hat, "\n",
+                  "delta_theta_hat", delta_theta_hat, "\n",
+                #   "x_k+1: ", x_curr[:3], 
+                  )
+            # print("A: ", A)
+            # print("b: ", b)
+
+            x_curr = x_curr.reshape(x_curr.shape[0]).tolist() #TODO: x one step in front of controls
+            u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
+
+            x_all.append(x_curr)
+            u_all.append(u_curr)
+            theta_all.append(theta)
+            theta_hat_all.append(theta_hat)
+
+        return x_all, u_all, theta_all, theta_hat_all
+    
+    def simulate_quadrotor_hover_with_RKAS(self, NSIM: int =200): #TODO: add RLS parameters here!
+        # initialize quadrotor parameters
+        theta = np.array([self.quadrotor.mass,self.quadrotor.g])
+        theta_hat = np.copy(theta)
+
+        # get tasks goals
+        x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], theta[1], self.quadrotor.kt)
+        check_grads(self.quadrotor.quad_dynamics_rk4, modes=['rev'], order=2)(x_nom, u_nom, self.quadrotor.mass, self.quadrotor.g)
+        Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta[0], theta[1])
+        Q, R = self.quadrotor_controller.get_QR_bryson()
+        self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+        # randomly perturb initial state
+        x0 = np.copy(x_nom)
+        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
+        print("Perturbed Intitial State: ")
+        print(x0)
+
+        # get initial control and state
+        u_curr = self.quadrotor_controller.compute(x0, x_nom, u_nom)
+        x_curr = np.copy(x0)
+
+        x_all = []
+        u_all = []
+        theta_all = []
+        theta_hat_all = []
+
+        changing_steps = np.random.choice(range(20,180),size=2, replace=False)
+        process_noise_std=np.zeros((13,1))+0.0001
+
+        df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
+        df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
+
+        rkas = RKAS()
+
+        # simulate the dynamics with the LQR controller
+        for i in range(NSIM):
+            # noising the parameters
+            # if i % 10 == 0:
+            #     theta += np.random.normal(0, process_noise_std, size=theta.shape)
+
+            # Change system parameters at specific step
+            # if i in changing_steps:
+            #     mass_update_scale = np.random.uniform(0.8, 1.3)
+            #     gravity_update_scale = np.random.uniform(0.8, 1.3)
+            #     theta = np.array([self.quadrotor.mass * mass_update_scale, self.quadrotor.g * gravity_update_scale])
+
+            # update goals
+            x_nom, u_nom = self.quadrotor.get_hover_goals(theta_hat[0], theta_hat[1], self.quadrotor.kt) #TODO: use moving ave filter?
+            Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta_hat[0], theta_hat[1])
+            self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+            # compute controls
+            
+            u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)                    # at t=k
+
+            # step
+            x_prev = x_curr                                                                     # at t=k
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta[0], theta[1])       # at t=k+1
+
+            # estimate parameters
+            theta_hat_prev = theta_hat                                                          # at t=k
+            A = np.column_stack((df_dm(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]),  # (num_states, num_params)
+                                 df_dg(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])))
+            f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]) # (num_states, 1)
+            b = (x_curr - f_at_theta_prev).reshape(-1,1) # (num_states, 1)
+            
+            if i % 10 == 0:
+                b += np.random.normal(0, process_noise_std, size=b.shape)
+
+            # print("normed residual at step: ", i, " is " np.linalg.norm(df_dtheta_at_theta_prev @ theta_hat- b))
+            # if i == 0:
+            #     rls.initialize(df_dtheta_at_theta_prev, b)
+            
+            delta_theta_hat = np.copy(rkas.solve(A, b, theta_hat_prev.reshape(-1,1), tol=1e-2)).reshape(-1,)                                       # at t=k+1
+            
+            # using LSQ SOLN
+            # delta_theta_hat = np.linalg.lstsq(A,b)[0].reshape(2)
+            theta_hat = delta_theta_hat + theta_hat_prev
+
+            print("step: ", i, "\n", 
+                  "u_k: ", u_curr, "\n", 
+                  "x_k: ", x_prev[:3], "\n", 
+                  "theta_k: ", theta, "\n", 
+                  "theta_hat_k: ", theta_hat, "\n",
+                  "delta_theta_hat", delta_theta_hat, "\n",
                   )
             # print("A: ", A)
             # print("b: ", b)
@@ -376,8 +589,8 @@ class OnlineParamEst:
         for i in range(NSIM):
             # Change system parameters at specific step
             if i in changing_steps:
-                mass_update_scale = np.random.uniform(1, 3/2)
-                gravity_update_scale = np.random.uniform(1, 3/2)
+                mass_update_scale = np.random.uniform(0.8, 1.3)
+                gravity_update_scale = np.random.uniform(0.8, 1.3)
                 theta = np.array([self.quadrotor.mass * mass_update_scale, self.quadrotor.g * gravity_update_scale])
 
             # update goals
@@ -474,7 +687,7 @@ class OnlineParamEst:
         theta_hat_all = []
 
         changing_steps = [30,100, 300]#np.random.choice(range(20,180),size=1, replace=False)
-        
+        process_noise_std = np.zeros((13,1)) + 0.0001
 
         df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
         df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
@@ -515,6 +728,8 @@ class OnlineParamEst:
                                  df_dg(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])))
             f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]) # (num_states, 1)
             b = x_curr - f_at_theta_prev # (num_states, 1)
+            if i % 10 == 0:
+                b += np.random.normal(0, process_noise_std, size=b.shape)
 
             # # Add to history queue
             # A_queue.append(A)
@@ -538,7 +753,7 @@ class OnlineParamEst:
                   "x_k: ", x_prev[:3], "\n",
                   "theta_k: ", theta, "\n",
                 #   "theta_km: ", theta_km, "\n",
-                  "theta_lstsq: ", theta_hat, "\n",
+                  "theta_deka: ", theta_hat, "\n",
                   )
             
             x_curr = x_curr.reshape(x_curr.shape[0]).tolist()
