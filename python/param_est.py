@@ -19,6 +19,7 @@ from utilities import visualize_trajectory, visualize_trajectory_with_est
 
 import argparse
 
+
 class OnlineParamEst:
     def __init__(self):
         # Quadrotor Tasks:
@@ -174,8 +175,8 @@ class OnlineParamEst:
             # print("normed residual at step: ", i, " is " np.linalg.norm(df_dtheta_at_theta_prev @ theta_hat- b))
             # if i == 0:
             #     rls.initialize(df_dtheta_at_theta_prev, b)
-            rls.update(A, b)
-            delta_theta_hat = np.copy(rls.predict().reshape(2))                                       # at t=k+1
+            estimate = rls.iterate(A, b)
+            delta_theta_hat = np.copy(estimate.reshape(2))                                       # at t=k+1
             
             # using LSQ SOLN
             # delta_theta_hat = np.linalg.lstsq(A,b)[0].reshape(2)
@@ -276,8 +277,8 @@ class OnlineParamEst:
             # print("normed residual at step: ", i, " is " np.linalg.norm(df_dtheta_at_theta_prev @ theta_hat- b))
             # if i == 0:
             #     rls.initialize(df_dtheta_at_theta_prev, b)
-            rls.update(A, b)
-            delta_theta_hat = np.copy(rls.predict().reshape(2))                                       # at t=k+1
+            estimate = rls.iterate(A, b)
+            delta_theta_hat = np.copy(estimate.reshape(2))                                       # at t=k+1
             
             # using LSQ SOLN
             # delta_theta_hat = np.linalg.lstsq(A,b)[0].reshape(2)
@@ -304,7 +305,6 @@ class OnlineParamEst:
 
         return x_all, u_all, theta_all, theta_hat_all
     
-
     def simulate_quadrotor_hover_with_EKF(self, NSIM:int=200): #TODO: add RLS parameters here!
         # initialize quadrotor parameters
         theta = np.array([self.quadrotor.mass,self.quadrotor.g])
@@ -376,8 +376,8 @@ class OnlineParamEst:
             if i % 10 == 0:
                 b += np.random.normal(0, process_noise_std, size=b.shape)
 
-            ekf.update(A, b)
-            delta_theta_hat = np.copy(ekf.predict().reshape(2))                                       # at t=k+1
+            estimate = ekf.iterate(A, b)
+            delta_theta_hat = np.copy(estimate.reshape(2))                                       # at t=k+1
             
             # using LSQ SOLN
             # delta_theta_hat = np.linalg.lstsq(A,b)[0].reshape(2)
@@ -1021,6 +1021,7 @@ class OnlineParamEst:
                 visualize_trajectory_with_est(x_history, u_history, theta_history, theta_hat_history, title)
         else: 
             print(f"Error: Method {method_name} not found. Use --help to see available option.")
+
 
 if __name__ == "__main__":
     OnlineParamEst.main()
