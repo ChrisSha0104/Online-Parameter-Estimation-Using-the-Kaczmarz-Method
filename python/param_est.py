@@ -641,11 +641,26 @@ class OnlineParamEst:
         entropy = 0.5 * np.linalg.slogdet(cov_matrix)[1]
         return entropy
 
-    
-    def simulate_quadrotor_hover_with_DEKA(self, NSIM: int =200):
-        theta = np.array([self.quadrotor.mass,self.quadrotor.g])
+    def simulate_quadrotor_hover_with_DEKA(self, NSIM: int = 200, entropy_threshold: float = 0.5, 
+                                        use_entropy_filter: bool = True, window_size: int = 1,
+                                        state_noise_std: float = 0.01):
+        """
+        Simulates quadrotor hover while estimating parameters with DEKA.
+        Optionally uses differential entropy over a sliding window of samples to decide on parameter updates.
+
+        Args:
+            NSIM (int): Number of simulation steps.
+            entropy_threshold (float): Maximum acceptable entropy score for using a data window.
+            use_entropy_filter (bool): If True, use the entropy filter before updating.
+            window_size (int): The number of most recent samples to include in the sliding window.
+        
+        Returns:
+            Tuple of lists: (x_all, u_all, theta_hat_all, theta_all)
+        """
+        # Initialize parameters and estimates.
+        theta = np.array([self.quadrotor.mass, self.quadrotor.g])
         theta_hat = np.copy(theta)
-        delta_theta_hat = np.array([[0.0,0.0]])
+        delta_theta_hat = np.array([[0.0, 0.0]])
 
         # get tasks goals
         x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], theta[1], self.quadrotor.kt)
@@ -658,20 +673,14 @@ class OnlineParamEst:
         x0 = np.copy(x_nom)
         x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
         x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
-        print("Perturbed Intitial State: ")
-        print(x0)
+        print("Perturbed Initial State:", x0)
 
         # get initial control and state
         u_curr = self.quadrotor_controller.compute(x0, x_nom, u_nom)
         x_curr = np.copy(x0)
 
-        x_all = []
-        u_all = []
-        theta_all = []
-        theta_hat_all = []
-
+        x_all, u_all, theta_all, theta_hat_all = [], [], [], []
         changing_steps = [30,100]#np.random.choice(range(20,180),size=1, replace=False)
-        
 
         df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
         df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
@@ -679,19 +688,15 @@ class OnlineParamEst:
         deka = DEKA()
 
         # Priority queue for history (fixed size)
-        queue_size = 3
-        A_queue, b_queue = deque(maxlen=queue_size), deque(maxlen=queue_size)
+        A_queue, b_queue = deque(maxlen=window_size), deque(maxlen=window_size)
 
-        # Keep track of scores for removal
-        score_queue = deque(maxlen=queue_size)
-
-        # Simulation loop
         for i in range(NSIM):
             # Change system parameters at specific step
             if i in changing_steps:
-                mass_update_scale = np.random.uniform(0.5, 2.)
+                mass_update_scale = np.random.uniform(0.5, 2.0)
                 gravity_update_scale = np.random.uniform(0.9, 1.1)
-                theta = np.array([self.quadrotor.mass * mass_update_scale, self.quadrotor.g * gravity_update_scale])
+                theta = np.array([self.quadrotor.mass * mass_update_scale,
+                                  self.quadrotor.g * gravity_update_scale])
 
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals(theta_hat[0], theta_hat[1], self.quadrotor.kt)
@@ -702,47 +707,68 @@ class OnlineParamEst:
             u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom) 
 
             # step
-            x_prev = x_curr                                                                     # at t=k
-            x_curr = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta[0], theta[1]) 
+            x_prev = x_curr # at t=k
+            x_prev += np.random.normal(0, state_noise_std, x_prev.shape)  # **Add Gaussian noise to true state**
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta[0], theta[1])
 
             # estimate parameters
-            theta_hat_prev = theta_hat                                                          # at t=k
-            A = np.column_stack((df_dm(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]),  # (num_states, num_params)
-                                 df_dg(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])))
-            f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]) # (num_states, 1)
-            b = x_curr - f_at_theta_prev # (num_states, 1)
+            theta_hat_prev = theta_hat # at t=k
 
-            # # Add to history queue
-            # A_queue.append(A)
-            # b_queue.append(b)
+            # Compute sensitivity matrix (A_sample) and offset (b_sample)
+            A_sample = np.column_stack((
+                df_dm(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1]),
+                df_dg(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])
+            ))
+            f_at_theta_prev = self.quadrotor.quad_dynamics_rk4(x_prev, u_curr, theta_hat_prev[0], theta_hat_prev[1])
+            b_sample = (x_curr - f_at_theta_prev).reshape(-1, 1)
 
-            # if i == 30 or i == 100:
-            #     A_queue.clear()
-            #     b_queue.clear() 
+            # Append new sample to the sliding window.
+            A_queue.append(A_sample)
+            b_queue.append(b_sample)
 
-            # lsq_delta = np.linalg.lstsq(A, b)[0]
-            # if len(A_queue) == queue_size:
-            #     A_hist = np.vstack(A_queue)  # Shape (13*3, 2)
-            #     b_hist = np.vstack(b_queue)  # Shape (13*3, 1)
+            # If the sliding window is full, compute the entropy and (if applicable) update.
+            if len(A_queue) == window_size:
+                A_hist = np.vstack(A_queue)
+                b_hist = np.vstack(b_queue)
 
-            delta_theta_hat_prev = delta_theta_hat
-            delta_theta_hat = deka.iterate(A.reshape(-1,2), b.reshape(-1,1), delta_theta_hat_prev.reshape(-1,1), 1000, 1e-4).reshape(2)
-            theta_hat = delta_theta_hat + theta_hat_prev
+                if use_entropy_filter:
+                    score = self.entropy_score(A_hist, b_hist)
+                    print(f"Iteration {i}, Differential Entropy Score: {score}")
+                    if score < entropy_threshold:
+                        delta_theta_hat_new = deka.iterate(
+                            A_hist.reshape(-1, 2),
+                            b_hist.reshape(-1, 1),
+                            delta_theta_hat.reshape(-1, 1),
+                            num_iterations=1000,
+                            tol=1e-4
+                        ).reshape(2)
+                        theta_hat = theta_hat_prev + delta_theta_hat_new
+                        delta_theta_hat = delta_theta_hat_new
+                    else:
+                        # Entropy too high; skip update.
+                        theta_hat = theta_hat_prev
+                else:
+                    delta_theta_hat_new = deka.iterate(
+                        A_hist.reshape(-1, 2),
+                        b_hist.reshape(-1, 1),
+                        delta_theta_hat.reshape(-1, 1),
+                        num_iterations=1000,
+                        tol=1e-4
+                    ).reshape(2)
+                    theta_hat = theta_hat_prev + delta_theta_hat_new
+                    delta_theta_hat = delta_theta_hat_new
 
-            print("step: ", i, "\n",
-                  "u_k: ", u_curr, "\n",
-                  "x_k: ", x_prev[:3], "\n",
-                  "theta_k: ", theta, "\n",
-                  "theta_lstsq: ", theta_hat, "\n",
+            print("step:", i, "\n",
+                  "u_k:", u_curr, "\n",
+                  "x_k:", x_prev[:3], "\n",
+                  "theta:", theta, "\n",
+                  "theta_hat:", theta_hat, "\n"
                   "delta_theta: ", delta_theta_hat, "\n"
                   )
-            
-            x_curr = x_curr.reshape(x_curr.shape[0]).tolist()
-            u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
-            
+
             # Store results
-            x_all.append(x_curr)
-            u_all.append(u_curr)
+            x_all.append(x_curr.reshape(-1).tolist())
+            u_all.append(u_curr.reshape(-1).tolist())
             theta_all.append(theta)
             theta_hat_all.append(theta_hat)
 
