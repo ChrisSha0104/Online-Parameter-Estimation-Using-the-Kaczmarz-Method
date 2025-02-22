@@ -685,7 +685,7 @@ class OnlineParamEst:
         df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
         df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
 
-        deka = DEKA()
+        deka = DEKA(theta.shape[0])
 
         # Priority queue for history (fixed size)
         A_queue, b_queue = deque(maxlen=window_size), deque(maxlen=window_size)
