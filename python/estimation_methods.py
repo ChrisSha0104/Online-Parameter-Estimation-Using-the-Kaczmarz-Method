@@ -9,12 +9,16 @@ class LMS:
     This is a gradient method and implements both normalized and unnormalized approaches.
     """
 
-    def __init__(self, num_params, theta_hat=None, gain=0.01, normalized=True, bias=1e-6):
+    def __init__(
+        self, num_params, theta_hat=None, gain=0.01, normalized=True, bias=1e-6
+    ):
         self.n = num_params
         self.gamma = gain
         self.bias = bias
         self.normalized = normalized
-        self.theta_hat = theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        self.theta_hat = (
+            theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        )
 
     def iterate(self, A, b):
         Q = np.ones((self.n, 1)) * self.gamma
@@ -38,7 +42,9 @@ class RLS:
         """
         self.n = num_params
         self.P = np.eye(num_params) * c
-        self.theta_hat = theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        self.theta_hat = (
+            theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        )
         self.lambda_ = forgetting_factor
 
     def iterate(self, A, b):
@@ -46,7 +52,11 @@ class RLS:
         :param A: Jacobian of system w.r.t. parameters.
         :param b: Measurement vector.
         """
-        K = self.P @ A.T @ np.linalg.inv(A @ self.P @ A.T + self.lambda_ * np.eye(A.shape[0]))
+        K = (
+            self.P
+            @ A.T
+            @ np.linalg.inv(A @ self.P @ A.T + self.lambda_ * np.eye(A.shape[0]))
+        )
         self.theta_hat += K @ (b - A @ self.theta_hat)
         self.P = (self.P - K @ A @ self.P) / self.lambda_
         return self.theta_hat
@@ -61,7 +71,9 @@ class AdaptiveLambdaRLS:
     Adjusts lambda such that forgetting is reduced when parameters are stable and increased when changing.
     """
 
-    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.98, alpha=0.01, c=1000):
+    def __init__(
+        self, num_params, theta_hat=None, forgetting_factor=0.98, alpha=0.01, c=1000
+    ):
         """
         :param num_params: Number of parameters to estimate.
         :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
@@ -71,7 +83,9 @@ class AdaptiveLambdaRLS:
         """
         self.n = num_params
         self.P = np.eye(num_params) * c
-        self.theta_hat = theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        self.theta_hat = (
+            theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        )
         self.lambda_ = forgetting_factor
         self.alpha = alpha
 
@@ -80,7 +94,11 @@ class AdaptiveLambdaRLS:
         :param A: Jacobian of system w.r.t. parameters.
         :param b: Measurement vector.
         """
-        K = self.P @ A.T @ np.linalg.inv(A @ self.P @ A.T + self.lambda_ * np.eye(A.shape[0]))
+        K = (
+            self.P
+            @ A.T
+            @ np.linalg.inv(A @ self.P @ A.T + self.lambda_ * np.eye(A.shape[0]))
+        )
         self.theta_hat += K @ (b - A @ self.theta_hat)
         self.P = (self.P - K @ A @ self.P) / self.lambda_
         self.lambda_ = 1 - self.alpha / (1 + np.linalg.norm(b - A @ self.theta_hat))
@@ -99,7 +117,9 @@ class EKF:
     measurement z_k is state x
     """
 
-    def __init__(self, num_params, process_noise, measurement_noise, theta_hat=None, c=1000):
+    def __init__(
+        self, num_params, process_noise, measurement_noise, theta_hat=None, c=1000
+    ):
         """
         :param num_params: Number of parameters to estimate (p).
         :param theta_hat: Initial estimate of parameters, otherwise set to zeros (p x 1 vector).
@@ -110,7 +130,9 @@ class EKF:
         :param R: Measurement noise covariance (d x d matrix)
         """
         self.n = num_params
-        self.theta_hat = theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        self.theta_hat = (
+            theta_hat if theta_hat is not None else np.zeros((num_params, 1))
+        )
         self.P = np.eye(num_params) * c
         self.Q = process_noise
         self.R = measurement_noise
@@ -126,7 +148,7 @@ class EKF:
         self.theta_hat += K @ (b - A @ self.theta_hat)
         self.P -= K @ A @ self.P
         return self.theta_hat
- 
+
 
 class RK:
     def __init__(self, alpha=0.99, epsilon=1e-8):
@@ -147,7 +169,7 @@ class RK:
 
         for _ in range(num_iterations):
             # Compute exponential weighting for the rows
-            row_norms = np.linalg.norm(A, axis=1)**2
+            row_norms = np.linalg.norm(A, axis=1) ** 2
 
             # Normalize by subtracting the maximum (robust to large values)
             row_norms -= np.max(row_norms)
@@ -170,7 +192,7 @@ class RK:
             i = np.random.choice(self.m, p=probabilities.flatten())
             a_i = np.array(self.A[i]).reshape(1, -1)  # Ensure a_i is a row vector
             b_i = np.array(self.b[i]).reshape(1, 1)  # Ensure b_i is a column vector
-            
+
             # Ensure that a_i has more than one element before calculating the norm
             if a_i.size > 1:
                 norm_a_i = np.linalg.norm(a_i)
@@ -192,25 +214,24 @@ class RK:
             increment = increment.reshape(self.n, 1)
             self.x = self.x + increment
         return self.x
-    
+
 
 class REK:
     def __init__(self):
         pass
-    
+
     def iterate(self, A, b, x0, num_iter, tol):
-        
         m, n = A.shape
 
         x_k = x0.copy()
         z_k = b.copy()
 
-        A_fro_sq = np.linalg.norm(A, 'fro') ** 2
+        A_fro_sq = np.linalg.norm(A, "fro") ** 2
         row_norms_sq = np.sum(A**2, axis=1)
         col_norms_sq = np.sum(A**2, axis=0)
 
         iter = 0
-        while(True):
+        while True:
             iter += 1
 
             i_k = np.random.choice(m, p=row_norms_sq / A_fro_sq)
@@ -221,16 +242,28 @@ class REK:
 
             if np.linalg.norm(A_jk) > 0:
                 # import pdb; pdb.set_trace()
-                z_k = z_k - ((np.dot(A_jk, z_k) / np.linalg.norm(A_jk)**2) * A_jk).reshape(-1,1)
+                z_k = z_k - (
+                    (np.dot(A_jk, z_k) / np.linalg.norm(A_jk) ** 2) * A_jk
+                ).reshape(-1, 1)
 
             if np.linalg.norm(A_ik) > 0:
-                x_k = x_k + (((b[i_k] - z_k[i_k] - np.dot(A_ik, x_k)) / np.linalg.norm(A_ik)**2) * A_ik).reshape(-1,1)
+                x_k = x_k + (
+                    (
+                        (b[i_k] - z_k[i_k] - np.dot(A_ik, x_k))
+                        / np.linalg.norm(A_ik) ** 2
+                    )
+                    * A_ik
+                ).reshape(-1, 1)
 
-            if iter % (8 * min(m,n)) == 0:
+            if iter % (8 * min(m, n)) == 0:
                 if np.linalg.norm(x_k) == 0:
                     break
-                term1 = np.linalg.norm(A @ x_k - (b - z_k)) / (np.linalg.norm(A, 'fro')**2 * np.linalg.norm(x_k))
-                term2 = np.linalg.norm(A.T @ z_k) / (np.linalg.norm(A, 'fro')**2 * np.linalg.norm(x_k))
+                term1 = np.linalg.norm(A @ x_k - (b - z_k)) / (
+                    np.linalg.norm(A, "fro") ** 2 * np.linalg.norm(x_k)
+                )
+                term2 = np.linalg.norm(A.T @ z_k) / (
+                    np.linalg.norm(A, "fro") ** 2 * np.linalg.norm(x_k)
+                )
 
                 if term1 <= tol and term2 <= tol:
                     break
@@ -268,8 +301,8 @@ class RKAS:
         # probabilities = row_norms / np.sum(row_norms)  # Pr(i_k = i)
 
         for k in range(max_iter):
-                       # Compute exponential weighting for the rows
-            row_norms = np.linalg.norm(A, axis=1)**2
+            # Compute exponential weighting for the rows
+            row_norms = np.linalg.norm(A, axis=1) ** 2
 
             # Normalize by subtracting the maximum (robust to large values)
             row_norms -= np.max(row_norms)
@@ -279,8 +312,8 @@ class RKAS:
 
             # Add epsilon to prevent division by zero or log(0)
             row_norms += self.epsilon
-            
-            #Absolute value of row norm
+
+            # Absolute value of row norm
             row_norms = np.abs(row_norms)
 
             # Calculate probabilities (should be stable now)
@@ -314,200 +347,205 @@ class RKAS:
 
 
 class DEKA:
-    def __init__(self, num_params, beta=0, x_0=None):
+    def __init__(
+        self,
+        num_params,
+        x0=None,
+        damping=0.1,
+        regularization=1e-6,
+        smoothing_factor=0.9,
+    ):
         """
-        Initializes the DEKA solver.
+        DEKA solver with damping, regularization, and exponential smoothing.
 
         Args:
-            beta (float): Momentum parameter, typically between 0 and 1.
+            num_params (int): Number of parameters to estimate.
+            x0 (np.ndarray): Initial guess for x (num_params x 1). Defaults to zeros.
+            damping (float): Damping factor to scale the update (e.g., 0.1).
+            regularization (float): Small constant added to denominator for stability.
+            smoothing_factor (float): Exponential smoothing factor in [0, 1).
+                                      Closer to 1 means more smoothing.
         """
-        self.n = num_params
-        self.beta = beta
-        self.x_k = x_0 if x_0 is not None else np.zeros((num_params, 1))
+        self.num_params = num_params
+        self.x_k = (
+            x0.reshape(num_params, 1) if x0 is not None else np.zeros((num_params, 1))
+        )
+        self.x_k_smooth = self.x_k.copy()
+        self.damping = damping
+        self.regularization = regularization
+        self.smoothing_factor = smoothing_factor
 
-    def iterate(self, A, b, x_0=None, num_iterations=1000, tol=0.01):
+    def iterate(self, A, b, x_0=None, num_iterations=1000, tol=1e-4):
         """
-        Solves the linear system Ax = b using the DEKA algorithm.
+        Performs DEKA iterations on the system Ax = b using damping and regularization,
+        then applies exponential smoothing to the final estimate.
 
         Args:
-            A (np.ndarray): The matrix A (num_states x num_params).
-            b (np.ndarray): The vector b (num_states x 1).
-            x0 (np.ndarray): The initial guess for x (num_params x 1).
-            num_iterations (int): The maximum number of iterations.
-            tol (float): The tolerance for convergence.
+            A (np.ndarray): Matrix A (num_rows x num_params).
+            b (np.ndarray): Vector b (num_rows x 1).
+            x_0 (np.ndarray): Optional new initial guess for x (num_params x 1).
+            num_iterations (int): Maximum number of iterations.
+            tol (float): Convergence tolerance based on the residual norm.
 
         Returns:
-            np.ndarray: The solution vector x (num_params x 1).
+            np.ndarray: The smoothed solution vector x (num_params x 1).
         """
-
         if x_0 is not None:
-            self.x_k = x_0
-
-        x_prev = self.x_k.copy()
+            self.x_k = x_0.reshape(self.num_params, 1)
 
         # Create a mask to ignore rows where A is all zeros
         row_mask = np.any(A != 0, axis=1)  # True for nonzero rows, False for zero rows
-
         if not np.any(row_mask):  # If all rows are zero, return x_k immediately
-            print("A has only zero rows, returning initial guess")
+            print("A has only zero rows, returning current estimate.")
             return self.x_k
-
-        if A.shape[0] == 0:
-            return self.x_k
-        
-        # Apply the mask to A and b
         A = A[row_mask]  # Keep only nonzero rows
         b = b[row_mask]  # Keep corresponding b values
 
         for k in range(num_iterations):
-            # import pdb; pdb.set_trace()
             residual = b - A @ self.x_k
-            residual_norm_sq = np.linalg.norm(residual)**2
+            if np.linalg.norm(residual) < tol:
+                break
 
-            # Compute epsilon_k
+            # Compute quantities needed for the update.
+            res_norm_sq = np.linalg.norm(residual) ** 2
             A_row_norms_sq = np.sum(A**2, axis=1) + 1e-10
-            # if np.any(A_row_norms_sq == 0):
-            #     print("A row norm zero")
-            #     return x_k
+            max_ratio = np.max(np.abs(residual.flatten()) ** 2 / A_row_norms_sq)
+            fro_norm_A_sq = np.linalg.norm(A, "fro") ** 2
+            epsilon_k = 0.5 * (max_ratio / res_norm_sq + 1 / fro_norm_A_sq)
 
-            max_ratio = np.max(np.abs(residual.flatten())**2 / A_row_norms_sq)
-            fro_norm_A_sq = np.linalg.norm(A, 'fro')**2
-            epsilon_k = 0.5 * (max_ratio / residual_norm_sq + 1 / fro_norm_A_sq)
-
-            # Determine the index set tau_k
+            # Determine indices tau_k where the residual is significant.
             tau_k = []
-            for i in range(A_row_norms_sq.shape[0]):
-                if (np.abs(residual[i])**2 / A_row_norms_sq[i]) >= epsilon_k * residual_norm_sq:
+            for i in range(A.shape[0]):
+                if (
+                    np.abs(residual[i]) ** 2 / A_row_norms_sq[i]
+                ) >= epsilon_k * res_norm_sq:
                     tau_k.append(i)
-            tau_k = np.array(tau_k)
+            if not tau_k:
+                print("Empty tau_k at iteration", k)
+                break
 
-            # Compute eta_k
-            if not tau_k.size:
-                print("Empty tau_k")
-                return self.x_k
-
-            eta_k = np.zeros_like(b)
+            # Form eta_k.
+            eta_k = np.zeros_like(residual)
             for i in tau_k:
                 eta_k[i] = residual[i]
 
-            # Update x_{k+1}
+            # Compute the update direction.
             A_T_eta_k = A.T @ eta_k
+            denom = np.linalg.norm(A_T_eta_k) ** 2 + self.regularization
+            numerator = eta_k.T @ residual
+            raw_update = (numerator / denom) * A_T_eta_k
 
-            # if np.linalg.norm(A_T_eta_k)**2 == 0:
-            #     print("DEKA converged in", k, "iterations")
-            #     return x_k
+            # Apply damping (scale the update).
+            update = self.damping * raw_update
 
-            x_next = self.x_k + (eta_k.T @ residual) / (np.linalg.norm(A_T_eta_k)**2) * A_T_eta_k + self.beta * (self.x_k - x_prev)
+            # Update the raw parameter estimate.
+            self.x_k = self.x_k + update
 
-            # Check for convergence
-            # if np.linalg.norm(x_next - x_k) < 0.0001:
-            #     print("DEKA converged in", k, "iterations")
-            #     return x_next
+            # if k % 10 == 0 and np.linalg.norm(b - A @ self.x_k) < tol:
+            #     print("residual new: ", np.linalg.norm(b - A @ self.x_k))
+            #     print("residual previous: ", np.linalg.norm(b - A @ x_prev))
+            #     if k < 10:
+            #         print("DEKA converged in", k, "iterations")
+            #         return self.x_k/3
+            #     else:
+            #         print("DEKA converged in", k, "iterations")
+            #         return self.x_k
 
-            # Update variables for the next iteration
-            x_prev = self.x_k
-            self.x_k = x_next
+        # Exponential smoothing to blend the new raw estimate into a smoothed version
+        self.x_k_smooth = (
+            self.smoothing_factor * self.x_k_smooth
+            + (1 - self.smoothing_factor) * self.x_k
+        )
 
-            if k % 10 == 0 and np.linalg.norm(b - A @ self.x_k) < tol:
-                print("residual new: ", np.linalg.norm(b - A @ self.x_k))
-                print("residual previous: ", np.linalg.norm(b - A @ x_prev))
-                if k < 10:
-                    print("DEKA converged in", k, "iterations")
-                    return self.x_k/3
-                else:
-                    print("DEKA converged in", k, "iterations")
-                    return self.x_k 
-                
-        print("DEKA did not converge within", num_iterations, "iterations, residual: ", np.linalg.norm(b - A @ self.x_k))
-        return self.x_k
-    
+        return self.x_k_smooth
+
 
 # class TestDEKA(unittest.TestCase):
-    # def test_square_matrix(self):
-    #     A = np.array([[2, 1], [5, 7]], dtype=float)
-    #     b = np.array([[11], [13]], dtype=float)
-    #     x0 = np.array([[1], [1]], dtype=float)
-    #     deka = DEKA()
-    #     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
+# def test_square_matrix(self):
+#     A = np.array([[2, 1], [5, 7]], dtype=float)
+#     b = np.array([[11], [13]], dtype=float)
+#     x0 = np.array([[1], [1]], dtype=float)
+#     deka = DEKA()
+#     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
 
-    # def test_underdetermined_system(self):
-    #     A = np.array([[1, 2, 3], [4, 5, 6]], dtype=float)
-    #     b = np.array([[14], [32]], dtype=float)
-    #     x0 = np.array([[0], [0], [0]], dtype=float)
-    #     deka = DEKA()
-    #     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
+# def test_underdetermined_system(self):
+#     A = np.array([[1, 2, 3], [4, 5, 6]], dtype=float)
+#     b = np.array([[14], [32]], dtype=float)
+#     x0 = np.array([[0], [0], [0]], dtype=float)
+#     deka = DEKA()
+#     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
 
-    # def test_overdetermined_system(self):
-    #     A = np.array([[1, 2], [3, 4], [5, 6]], dtype=float)
-    #     b = np.array([[3], [7], [11]], dtype=float)
-    #     x0 = np.array([[0], [0]], dtype=float)
-    #     deka = DEKA()
-    #     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
+# def test_overdetermined_system(self):
+#     A = np.array([[1, 2], [3, 4], [5, 6]], dtype=float)
+#     b = np.array([[3], [7], [11]], dtype=float)
+#     x0 = np.array([[0], [0]], dtype=float)
+#     deka = DEKA()
+#     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
 
-    # def test_random_system(self):
-    #     A = np.random.rand(10, 5)
-    #     x = np.random.rand(5, 1)
-    #     b = np.dot(A, x)
-    #     x0 = np.zeros((5, 1))
-    #     deka = DEKA()
-    #     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
-        
-    # def test_empty_tau_k(self):
-    #     A = np.array([[1, 0], [0, 1]], dtype=float)
-    #     b = np.array([[0], [0]], dtype=float)  # b is in the null space of A
-    #     x0 = np.array([[1], [1]], dtype=float)  # Initial guess
-    #     deka = DEKA()
-    #     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     # In this case, we expect the algorithm to return the initial guess
-    #     # because the residual is zero, leading to an empty tau_k.
-    #     self.assertTrue(np.allclose(x, x0, atol=1e-5))
+# def test_random_system(self):
+#     A = np.random.rand(10, 5)
+#     x = np.random.rand(5, 1)
+#     b = np.dot(A, x)
+#     x0 = np.zeros((5, 1))
+#     deka = DEKA()
+#     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
 
-    # def test_square_matrix(self):
-    #     A = np.array([[2, 1], [5, 7]], dtype=float)
-    #     b = np.array([[11], [13]], dtype=float)
-    #     x0 = np.array([[1], [1]], dtype=float)
-    #     rk = RK()
-    #     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
+# def test_empty_tau_k(self):
+#     A = np.array([[1, 0], [0, 1]], dtype=float)
+#     b = np.array([[0], [0]], dtype=float)  # b is in the null space of A
+#     x0 = np.array([[1], [1]], dtype=float)  # Initial guess
+#     deka = DEKA()
+#     x = deka.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     # In this case, we expect the algorithm to return the initial guess
+#     # because the residual is zero, leading to an empty tau_k.
+#     self.assertTrue(np.allclose(x, x0, atol=1e-5))
 
-    # def test_underdetermined_system(self):
-    #     A = np.array([[1, 2, 3], [4, 5, 6]], dtype=float)
-    #     b = np.array([[14], [32]], dtype=float)
-    #     x0 = np.array([[0], [0], [0]], dtype=float)
-    #     rk = RK()
-    #     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
+# def test_square_matrix(self):
+#     A = np.array([[2, 1], [5, 7]], dtype=float)
+#     b = np.array([[11], [13]], dtype=float)
+#     x0 = np.array([[1], [1]], dtype=float)
+#     rk = RK()
+#     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
 
-    # def test_overdetermined_system(self):
-    #     A = np.array([[1, 2], [3, 4], [5, 6]], dtype=float)
-    #     b = np.array([[3], [7], [11]], dtype=float)
-    #     x0 = np.array([[0], [0]], dtype=float)
-    #     rk = RK()
-    #     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
+# def test_underdetermined_system(self):
+#     A = np.array([[1, 2, 3], [4, 5, 6]], dtype=float)
+#     b = np.array([[14], [32]], dtype=float)
+#     x0 = np.array([[0], [0], [0]], dtype=float)
+#     rk = RK()
+#     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
 
-    # def test_random_system(self):
-    #     A = np.random.rand(10, 5)
-    #     x = np.random.rand(5, 1)
-    #     b = np.dot(A, x)
-    #     x0 = np.zeros((5, 1))
-    #     rk = RK()
-    #     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
-        
-    # def test_empty_tau_k(self):
-    #     A = np.array([[1, 0], [0, 1]], dtype=float)
-    #     b = np.array([[0], [0]], dtype=float)  # b is in the null space of A
-    #     x0 = np.array([[1], [1]], dtype=float)  # Initial guess
-    #     rk = RK()
-    #     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
-    #     # In this case, we expect the algorithm to return the initial guess
-    #     # because the residual is zero, leading to an empty tau_k.
-    #     self.assertTrue(np.allclose(x, x0, atol=1e-5))
+# def test_overdetermined_system(self):
+#     A = np.array([[1, 2], [3, 4], [5, 6]], dtype=float)
+#     b = np.array([[3], [7], [11]], dtype=float)
+#     x0 = np.array([[0], [0]], dtype=float)
+#     rk = RK()
+#     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
 
-if __name__ == '__main__':
+# def test_random_system(self):
+#     A = np.random.rand(10, 5)
+#     x = np.random.rand(5, 1)
+#     b = np.dot(A, x)
+#     x0 = np.zeros((5, 1))
+#     rk = RK()
+#     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     self.assertTrue(np.allclose(A @ x, b, atol=1e-5))
+
+# def test_empty_tau_k(self):
+#     A = np.array([[1, 0], [0, 1]], dtype=float)
+#     b = np.array([[0], [0]], dtype=float)  # b is in the null space of A
+#     x0 = np.array([[1], [1]], dtype=float)  # Initial guess
+#     rk = RK()
+#     x = rk.iterate(A, b, x0, num_iterations=100, tol=1e-6)
+#     # In this case, we expect the algorithm to return the initial guess
+#     # because the residual is zero, leading to an empty tau_k.
+#     self.assertTrue(np.allclose(x, x0, atol=1e-5))
+
+if __name__ == "__main__":
     unittest.main()
