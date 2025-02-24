@@ -414,20 +414,13 @@ class DEKA:
             epsilon_k = 0.5 * (max_ratio / res_norm_sq + 1 / fro_norm_A_sq)
 
             # Determine indices tau_k where the residual is significant.
-            tau_k = []
-            for i in range(A.shape[0]):
-                if (
-                    np.abs(residual[i]) ** 2 / A_row_norms_sq[i]
-                ) >= epsilon_k * res_norm_sq:
-                    tau_k.append(i)
-            if not tau_k:
+            tau_k = np.where((residual ** 2).squeeze() / A_row_norms_sq >= epsilon_k * res_norm_sq, 1, 0)
+
+            if tau_k.sum() == 0:
                 print("Empty tau_k at iteration", k)
                 break
 
-            # Form eta_k.
-            eta_k = np.zeros_like(residual)
-            for i in tau_k:
-                eta_k[i] = residual[i]
+            eta_k = tau_k.reshape(-1, 1) * residual # apply mask to residual
 
             # Compute the update direction.
             A_T_eta_k = A.T @ eta_k
