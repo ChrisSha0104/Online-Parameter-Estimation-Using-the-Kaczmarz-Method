@@ -7,6 +7,8 @@ from autograd.numpy.linalg import inv
 from autograd import jacobian
 import pdb
 
+from utilities import quaternion_to_rotation_matrix
+
 from simulator import Sim
 
 class Quadrotor():
@@ -18,7 +20,9 @@ class Quadrotor():
 
         # Quadrotor parameters
         self.mass = 0.035  # mass
-        self.J = np.array([[1.66e-5, 0.83e-6, 0.72e-6], [0.83e-6, 1.66e-5, 1.8e-6], [0.72e-6, 1.8e-6, 2.93e-5]])  # inertia
+        self.J = np.array([[1.66e-5, 0.83e-6, 0.72e-6], 
+                           [0.83e-6, 1.66e-5, 1.8e-6], 
+                           [0.72e-6, 1.8e-6, 2.93e-5]], dtype=np.float64)  # inertia
         self.g = 9.81  # gravity
         # thrustToTorque = 0.005964552
         self.thrustToTorque = 0.0008  # thrust to torque ratio
@@ -92,7 +96,13 @@ class Quadrotor():
         return E
     
     # Quadrotor dynamics -- single rigid body dynamics
-    def quad_dynamics(self, x, u, mass, g):
+    def quad_dynamics(self, x, u, theta):
+        mass = theta[0]
+        Ixx, Iyy, Izz, Ixy, Ixz, Iyz = theta[1:7]
+        self.J = np.array([[Ixx, Ixy, Ixz],
+                           [Ixy, Iyy, Iyz],
+                           [Ixz, Iyz, Izz]], dtype=np.float64)
+
         r = x[0:3]  # position
         q = x[3:7]/norm(x[3:7])  # normalize quaternion
         v = x[7:10]  # linear velocity
@@ -101,39 +111,71 @@ class Quadrotor():
 
         dr = v
         dq = 0.5*self.L(q)@self.H@omg
-        dv = np.array([0, 0, -g]) + (1/mass)*Q@np.array([[0, 0, 0, 0], [0, 0, 0, 0], [self.kt, self.kt, self.kt, self.kt]])@u
+        dv = np.array([0, 0, -self.g]) + (1/mass)*Q@np.array([[0, 0, 0, 0], [0, 0, 0, 0], [self.kt, self.kt, self.kt, self.kt]])@u
         domg = inv(self.J)@(-self.hat(omg)@self.J@omg + np.array([[-self.el*self.kt, -self.el*self.kt, self.el*self.kt, self.el*self.kt], [-self.el*self.kt, self.el*self.kt, self.el*self.kt, -self.el*self.kt], [-self.km, self.km, -self.km, self.km]])@u)
         return np.hstack([dr, dq, dv, domg])
 
     # RK4 integration with zero-order hold on u
-    def quad_dynamics_rk4(self, x, u, mass, g):
-        f1 = self.quad_dynamics(x, u, mass, g)
-        f2 = self.quad_dynamics(x + 0.5*self.sim.h*f1, u, mass, g)
-        f3 = self.quad_dynamics(x + 0.5*self.sim.h*f2, u, mass, g)
-        f4 = self.quad_dynamics(x + self.sim.h*f3, u, mass, g)
+    def quad_dynamics_rk4(self, x, u, theta):
+        f1 = self.quad_dynamics(x, u, theta)
+        f2 = self.quad_dynamics(x + 0.5*self.sim.h*f1, u, theta)
+        f3 = self.quad_dynamics(x + 0.5*self.sim.h*f2, u, theta)
+        f4 = self.quad_dynamics(x + self.sim.h*f3, u, theta)
         xn = x + (self.sim.h/6.0)*(f1 + 2*f2 + 2*f3 + f4)
         xnormalized = xn[3:7]/norm(xn[3:7])  # normalize quaternion
         return np.hstack([xn[0:3], xnormalized, xn[7:13]])
     
-    def get_hover_goals(self, mass, g, kt):
+    def get_data_matrix(self, dx):
+        a_x, a_y, a_z = dx[7:10]
+        a_p, a_q, a_r = dx[10:13]
+
+        A = np.array([
+            [a_x, 0, 0, 0, 0, 0, 0],  # fx equation (acceleration)
+            [a_y, 0, 0, 0, 0, 0, 0],  # fy equation
+            [a_z, 0, 0, 0, 0, 0, 0],  # fz equation
+            [0, a_p, a_q, a_r, 0, 0, 0],  # τx equation (angular acceleration)
+            [0, a_p, a_q, a_r, 0, 0, 0],  # τy equation
+            [0, a_p, a_q, a_r, 0, 0, 0.1]  # τz equation
+        ], dtype=np.float64)
+
+        return A
+    
+    def get_force_vector(self, x_curr, u_curr, theta):
+        R = quaternion_to_rotation_matrix(x_curr[3:7])
+
+        F_b = np.array([[0], 
+                      [0],  
+                      [np.sum(u_curr) * self.kt]]) # TODO: fix this dim
+        F_w = R @ F_b
+        F_w[2] -= theta[0] * self.g
+
+        tau_b = np.array([[self.el*(u_curr[1] - u_curr[3])],
+                        [-self.el*(u_curr[0] - u_curr[2])], 
+                        [self.thrustToTorque*(u_curr[0] - u_curr[1] + u_curr[2] - u_curr[3])]])
+        tau_w = R @ tau_b
+        return np.vstack([F_w, tau_w])
+
+    def get_hover_goals(self, theta):
+        mass = theta[0]
+
         # Hovering state and control input
         self.rg = np.array([0.0, 0, 0.0])
         self.qg = np.array([1.0, 0, 0, 0])
         self.vg = np.zeros(3)
         self.omgg = np.zeros(3)
         self.xg = np.hstack([self.rg, self.qg, self.vg, self.omgg])
-        self.uhover = (mass*g/kt/4)*np.ones(4)  # ~each motor thrust to compensate for gravity
+        self.uhover = (mass*self.g/self.kt/4)*np.ones(4)  # ~each motor thrust to compensate for gravity
         # print("Hovering Initial State and Control")
         # print(self.xg, self.uhover)
 
         return self.xg, self.uhover
     
     #TODO: add kt as param?
-    def get_linearized_dynamics(self, xg, uhover, mass, g):
+    def get_linearized_dynamics(self, xg, uhover, theta):
         self.rg = np.array([0.0, 0, 0.0])
         self.qg = np.array([1.0, 0, 0, 0])
-        Anp = self.A_jac(xg, uhover, mass, g)
-        Bnp = self.B_jac(xg, uhover, mass, g)
+        Anp = self.A_jac(xg, uhover, theta)
+        Bnp = self.B_jac(xg, uhover, theta)
         self.Anp = self.E(self.qg).T @ Anp @ self.E(self.qg)
         self.Bnp = self.E(self.qg).T @ Bnp
 
