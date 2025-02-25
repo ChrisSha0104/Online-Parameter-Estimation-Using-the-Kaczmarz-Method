@@ -70,9 +70,9 @@ class Quadrotor():
         phi,theta,psi = x[6:9]   # Euler angles: [phi, theta, psi]
         p,q,r = x[9:12]   # Angular velocity
         F = (Ff+Fr+Fb+Fl)
+
         # The following matrix maps motor inputs to body torques.
         tau = np.array([self.el*(Fl-Fr),self.el*(Ff-Fb),(Fr+Fl-Ff-Fb)/self.thrustToTorque])
-      #  print("F: ",F, "tau: ", tau)
         x_dot,y_dot,z_dot = u_,v,w
         phi_dot,theta_dot,psi_dot = p,q,r
 
@@ -81,8 +81,8 @@ class Quadrotor():
         w_dot = -(self.g - np.cos(phi)*np.cos(theta)*F/mass)
        
         p_dot = (Jy-Jz)/Jx *q*r +tau[0]/Jx
-        q_dot =  (Jz-Jx)/Jy *p*r + tau[1] / Jy#self.J[1][1]
-        r_dot = (Jx-Jy)/Jz *q*p + tau[2] / Jz#self.J[2][2]
+        q_dot =  (Jz-Jx)/Jy *p*r + tau[1] / Jy
+        r_dot = (Jx-Jy)/Jz *q*p + tau[2] / Jz
         print("tau: ", tau)
         print("rdot: ", r_dot)
         return np.hstack([x_dot,y_dot,z_dot,u_dot,v_dot,w_dot,phi_dot,theta_dot,psi_dot,p_dot,q_dot,r_dot])
@@ -115,14 +115,11 @@ class Quadrotor():
         b : shape (6,)
         """
         # Cross terms for translational eq
-        # a_x, a_y, a_z = [dV^B/dt + w^B x V^B]
-        a = dVb + np.cross(wB, Vb)  # shape (3,)
-        a2 = dwB + np.cross(wB, wB)
+        a = dVb + np.cross(wB, Vb)  
         A = np.zeros((6, 4))
         b = np.zeros((6,1))
 
         print("a3: ", a[2],"F: ", F[2])
-       # print("F: ", F)
         # 1) Translational
         A[0,:] = [ a[0], 0,    0,    0 ]
         A[1,:] = [ a[1], 0,    0,    0 ]
@@ -137,17 +134,17 @@ class Quadrotor():
         dp, dq, dr = dwB
         tau_x, tau_y, tau_z = tau
 
-        # eq for tau_x = Jx*dp + (Jy - Jz)*q*r
+        # eq for tau_x = Jx*dp - (Jy - Jz)*q*r
         # => row is [0, dp, q*r, -q*r]
         A[3,:] = [ 0, dp, -q*r, q*r ]
         b[3,0] = tau_x
 
-        # eq for tau_y = Jy*dq + (Jz - Jx)*r*p
+        # eq for tau_y = Jy*dq - (Jz + Jx)*r*p
         # => row is [0, -r*p, dq, r*p]
         A[4,:] = [ 0, r*p, dq, -r*p ]
         b[4,0] = tau_y
 
-        # eq for tau_z = Jz*dr + (Jx - Jy)*p*q
+        # eq for tau_z = Jz*dr - (Jx - Jy)*p*q
         # => row is [0, p*q, -p*q, dr]
         A[5,:] = [ 0, -p*q, p*q, dr ]
         b[5,0] = tau_z
@@ -155,7 +152,6 @@ class Quadrotor():
         
         return A, b
     
-    # RK4 integration with zero-order hold on u
     def delta_x_quat(self, x_curr, x_nom):
         # Compute the state deviation
         delta_x = x_curr-x_nom

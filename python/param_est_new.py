@@ -32,14 +32,7 @@ class OnlineParamEst:
         print("Perturbed Intitial State: ")
         print(x0)
         u0 = np.array([0,0,0,0])
-        x0_dot = self.quadrotor.quad_dynamics(x0,u0,theta[0],theta[1], theta[2], theta[3])
-        Vb  = x0[3:6]         # linear velocity
-        wB  = x0[9:12]        # angular velocity
-        dVb = x0_dot[3:6]      # linear accel
-        dwB = x0_dot[9:12]     # angular accel
-        F = np.array([0,0,np.sum(u0)])
-        tau = self.quadrotor.get_tau(u0, self.quadrotor.el, self.quadrotor.thrustToTorque)
-        A,b = self.quadrotor.get_linear_system(Vb, wB, dVb, dwB, F, tau)
+    
         # get tasks goals
         Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta[0],theta[1],theta[2],theta[3])
         Q, R = self.quadrotor_controller.get_QR_bryson()
@@ -58,10 +51,7 @@ class OnlineParamEst:
         x_curr = np.copy(x0)
         x_prev = np.copy(x0)
 
-        change_params = False
         changing_steps = np.random.choice(range(20,180),size=3, replace=False)
-
-        rls = RLS(num_params=1)
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
@@ -76,14 +66,7 @@ class OnlineParamEst:
             # MPC controller
             if update_status == "immediate_update":
                 if i in changing_steps:
-                    x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], self.quadrotor.kt)
-                    x_dot = self.quadrotor.quad_dynamics(x_all[-1],u_all[-1],self.quadrotor.mass,self.quadrotor.Jx,self.quadrotor.Jy,self.quadrotor.Jz)
-                    Vb  = x_all[-1][3:6]         # linear velocity
-                    wB  = x_all[-1][9:12]        # angular velocity
-                    dVb = x_dot[3:6]      # linear accel
-                    dwB = x_dot[9:12]     # angular accel
-                    F = np.array([0,0,np.sum(u_all[-1])])
-                    tau = self.quadrotor.get_tau(u_all[-1],self.quadrotor.el, self.quadrotor.thrustToTorque)
+                    x_nom, u_nom = self.quadrotor.get_hover_goals(theta[0], self.quadrotor.kt)                   
                     Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta[0], theta[1],theta[2],theta[3])
                     self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
                 u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)
@@ -105,7 +88,6 @@ class OnlineParamEst:
                   "theta_k: ", theta, "\n", 
                   )
 
-            # postponing the dynamics model by telling it the correct parameters after several steps
             x_prev = x_curr
             x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta[0],theta[1],theta[2],theta[3])
 
@@ -158,7 +140,6 @@ class OnlineParamEst:
         x_curr = np.copy(x0)
         x_prev = np.copy(x0)
 
-        change_params = False
         changing_steps = np.random.choice(range(20,380),size=3, replace=False)
 
         rls = RLS(num_params=4)
@@ -383,13 +364,8 @@ class OnlineParamEst:
         theta_all.append(theta)
         
         x_curr = np.copy(x0)
-        x_prev = np.copy(x0)
 
-        change_params = False
         changing_steps = np.random.choice(range(20,300),size=3, replace=False)
-
-        rls = RLS(num_params=4)
-
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
             # change mass
@@ -419,15 +395,12 @@ class OnlineParamEst:
             # postponing the dynamics model by telling it the correct parameters after several steps
             x_prev = x_curr
             x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta[0],theta[1],theta[2],theta[3])
-
             
            
             print("step: ", i, "\n", 
                   "u_k: ", u_curr, "\n", 
-                #   "x_k: ", x_prev[:3], "\n", 
-                #   "theta_k: ", theta, "\n", 
-                #   "theta_hat_k: ", theta_hat, "\n",
-                #   "least squares solution: ", lsq_soln, "\n",
+                  "x_k: ", x_prev[:3], "\n", 
+                  "theta_k: ", theta, "\n", 
                   )
             x_curr = x_curr.reshape(x_curr.shape[0]).tolist()
             u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
