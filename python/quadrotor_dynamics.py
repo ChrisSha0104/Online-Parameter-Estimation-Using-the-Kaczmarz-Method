@@ -72,20 +72,12 @@ class Quadrotor():
     def qtorp(self, q):
         return q[1:4]/q[0]
     
-    def delta_x_quat(self, x_curr, x_nom):
+    def delta_x_quat(self, x_curr, x_nom=None):
+        if not x_nom:
+            x_nom = self.xg
         q = x_curr[3:7]
-        q_nom = x_nom[3:7]
-
-        # Compute the relative quaternion
-        phi = self.qtorp(self.L(q_nom).T @ q)
-
-        # Compute the state deviation
-        delta_x = np.hstack([
-            x_curr[0:3] - x_nom[0:3],  # Position deviation
-            phi,                       # Orientation deviation
-            x_curr[7:10] - x_nom[7:10],  # Linear velocity deviation
-            x_curr[10:13] - x_nom[10:13] # Angular velocity deviation
-        ])
+        phi = self.qtorp(self.L(self.qg).T @ q)
+        delta_x = np.hstack([x_curr[0:3]-self.rg, phi, x_curr[7:10]-self.vg, x_curr[10:13]-self.omgg])
         return delta_x
 
     def E(self, q):
