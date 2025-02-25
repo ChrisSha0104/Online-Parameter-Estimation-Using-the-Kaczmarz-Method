@@ -73,8 +73,8 @@ class Quadrotor():
         return q[1:4]/q[0]
     
     def delta_x_quat(self, x_curr, x_nom=None):
-        if not x_nom:
-            x_nom = self.xg
+        # if not x_nom:
+        #     x_nom = self.xg
         q = x_curr[3:7]
         phi = self.qtorp(self.L(self.qg).T @ q)
         delta_x = np.hstack([x_curr[0:3]-self.rg, phi, x_curr[7:10]-self.vg, x_curr[10:13]-self.omgg])
@@ -90,7 +90,7 @@ class Quadrotor():
     # Quadrotor dynamics -- single rigid body dynamics
     def quad_dynamics(self, x, u, theta):
         mass = theta[0]
-        Ixx, Iyy, Izz, Ixy, Ixz, Iyz = theta[1:7]
+        Ixx,Ixy,Ixz,Iyy,Iyz,Izz = theta[1:7]
         self.J = np.array([[Ixx, Ixy, Ixz],
                            [Ixy, Iyy, Iyz],
                            [Ixz, Iyz, Izz]], dtype=np.float64)
@@ -117,23 +117,24 @@ class Quadrotor():
         xnormalized = xn[3:7]/norm(xn[3:7])  # normalize quaternion
         return np.hstack([xn[0:3], xnormalized, xn[7:13]])
     
-    def get_data_matrix(self, dx):
+    def get_data_matrix(self, x_curr, dx):
         a_x, a_y, a_z = dx[7:10]
         a_p, a_q, a_r = dx[10:13]
+        w_x, w_y, w_z = x_curr[10:13]
 
         A = np.array([
             [a_x, 0, 0, 0, 0, 0, 0],  # fx equation (acceleration)
             [a_y, 0, 0, 0, 0, 0, 0],  # fy equation
             [a_z, 0, 0, 0, 0, 0, 0],  # fz equation
-            [0, a_p, a_q, a_r, 0, 0, 0],  # τx equation (angular acceleration)
-            [0, a_p, a_q, a_r, 0, 0, 0],  # τy equation
-            [0, a_p, a_q, a_r, 0, 0, 0.1]  # τz equation
+            [0, a_p, a_q-w_x*w_z, a_r+w_x*w_y, -w_y*w_z, w_y**2+w_z**2, w_y*w_z],  # τx equation (angular acceleration)
+            [0, w_x*w_z, a_p+w_y*w_z, w_z**2-w_x**2, a_q, a_r-w_x*w_y, -w_x*w_z],  # τy equation
+            [0, -w_x*w_y, w_x**2-w_y**2, a_p-w_y*w_z, w_x*w_y, a_q+w_x*w_z, a_r]  # τz equation
         ], dtype=np.float64)
 
         return A
     
     def get_force_vector(self, x_curr, u_curr, theta):
-        R = quaternion_to_rotation_matrix(x_curr[3:7])
+        R = self.qtoQ(x_curr[3:7])
 
         F_b = np.array([[0], 
                       [0],  
@@ -141,11 +142,10 @@ class Quadrotor():
         F_w = R @ F_b
         F_w[2] -= theta[0] * self.g
 
-        tau_b = np.array([[self.el*(u_curr[1] - u_curr[3])],
-                        [-self.el*(u_curr[0] - u_curr[2])], 
-                        [self.thrustToTorque*(u_curr[0] - u_curr[1] + u_curr[2] - u_curr[3])]])
-        tau_w = R @ tau_b
-        return np.vstack([F_w, tau_w])
+        tau_b = np.array([[self.el*self.kt*(-u_curr[0]-u_curr[1]+u_curr[2]+u_curr[3])], # - - + +
+                        [self.el*self.kt*(-u_curr[0]+u_curr[1]+u_curr[2]-u_curr[3])],  # - + + -
+                        [self.km*(-u_curr[0] + u_curr[1] - u_curr[2] + u_curr[3])]]) # - + - +
+        return np.vstack([F_w, tau_b])
 
     def get_hover_goals(self, theta):
         mass = theta[0]

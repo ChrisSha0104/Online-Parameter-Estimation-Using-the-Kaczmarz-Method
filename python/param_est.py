@@ -33,7 +33,7 @@ class OnlineParamEst:
         # initialize quadrotor parameters
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
         Ixy, Ixz, Iyz = self.quadrotor.J[0,1], self.quadrotor.J[0,2], self.quadrotor.J[1,2]
-        theta = np.array([self.quadrotor.mass,Ixx,Iyy,Izz,Ixy,Ixz,Iyz])
+        theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
         
         # get tasks goals
         x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
@@ -107,7 +107,7 @@ class OnlineParamEst:
         np.set_printoptions(suppress=False, precision=10)
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
         Ixy, Ixz, Iyz = self.quadrotor.J[0,1], self.quadrotor.J[0,2], self.quadrotor.J[1,2]
-        theta = np.array([self.quadrotor.mass,Ixx,Iyy,Izz,Ixy,Ixz,Iyz])
+        theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
         theta_hat = theta.copy()
         
         # get tasks goals
@@ -138,7 +138,7 @@ class OnlineParamEst:
         # df_dm = jacobian(self.quadrotor.quad_dynamics_rk4, 2)
         # df_dg = jacobian(self.quadrotor.quad_dynamics_rk4, 3)
 
-        rls = RLS(num_params=2)
+        rls = RLS(num_params=7)
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
@@ -163,20 +163,20 @@ class OnlineParamEst:
             x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)       # at t=k+1
             
             # formulate measurement model
-            A = self.quadrotor.get_data_matrix(self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
+            A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
             b = self.quadrotor.get_force_vector(x_curr, u_curr, theta)
+            
+            # import pdb; pdb.set_trace()
+            theta_hat = rls.iterate(A,b).reshape(-1,)
+            # theta_hat = np.linalg.lstsq(A, b)[0]
 
-            import pdb; pdb.set_trace() 
-
-            theta_hat = np.linalg.lstsq(A, b)[0]
-            print(np.linalg.norm(theta_hat-theta))
-
-            # print("step: ", i, "\n", 
-            #       "u_k: ", u_curr, "\n", 
-            #       "x_k: ", x_prev[:3], "\n", 
-            #       "theta_k: ", theta, "\n", 
-            #       "theta_hat_k: ", theta_hat, "\n",
-                #   )
+            print("step: ", i, "\n", 
+                "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
+                #   "u_k: ", u_curr, "\n", 
+                #   "x_k: ", x_curr[:3], "\n", 
+                #   "theta_k: ", theta, "\n", 
+                #   "theta_hat_k: ", theta_hat, "\n",
+                  )
             # print("A: ", A)
             # print("b: ", b)
 
