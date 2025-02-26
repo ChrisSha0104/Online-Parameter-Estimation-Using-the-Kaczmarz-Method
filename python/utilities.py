@@ -98,7 +98,7 @@ def visualize_trajectory(x_all, u_all, theta_all, title):
 
 def visualize_trajectory_with_est(x_all, u_all, theta_all, theta_hat_all, title):
     # Set up the figure and axis for plotting
-    fig, ax = plt.subplots(4, 1)
+    fig, ax = plt.subplots(9, 1)
 
     # Plot the trajectory
     x_all = np.array(x_all)
@@ -108,31 +108,43 @@ def visualize_trajectory_with_est(x_all, u_all, theta_all, theta_hat_all, title)
     ax[0].plot(steps, x_all[:, 1], label="y", linewidth=1)
     ax[0].plot(steps, x_all[:, 2], label="z", linewidth=1)
     ax[0].legend()
-    ax[0].title.set_text("Position")
+    ax[0].title.set_text("Position Tracking")
+
+    # theta_all = np.array(theta_all)
+    # theta_hat_all = np.array(theta_hat_all)
+    # nsteps = len(theta_all)
+    # steps = np.arange(nsteps)
+    # ax[1].plot(steps, np.mean(theta_all, axis=1), label="ave param gt", linewidth=1)
+    # ax[1].plot(steps, np.mean(theta_hat_all, axis=1), label="ave param est", linewidth=1)
+    # ax[1].legend()
+    # ax[1].title.set_text("Parameter Tracking")
+
+
+
+    # ax[2].plot(steps, theta_all[:,1], label="g", linewidth=1)
+    # ax[2].plot(steps, theta_hat_all[:,1], label="g_hat", linewidth=1)
+    # ax[2].legend()
+    # ax[2].title.set_text("Param: Gravity")
+
+    u_all = np.array(u_all)
+    nsteps = len(u_all)
+    steps = np.arange(nsteps)
+    ax[1].plot(steps, u_all[:, 0], label="u1", linewidth=1)
+    ax[1].plot(steps, u_all[:, 1], label="u2", linewidth=1)
+    ax[1].plot(steps, u_all[:, 2], label="u3", linewidth=1)
+    ax[1].plot(steps, u_all[:, 3], label="u4", linewidth=1)
+    ax[1].legend()
+    ax[1].title.set_text("Controls")
 
     theta_all = np.array(theta_all)
     theta_hat_all = np.array(theta_hat_all)
     nsteps = len(theta_all)
     steps = np.arange(nsteps)
-    ax[1].plot(steps, theta_all[:,0], label="m", linewidth=1)
-    ax[1].plot(steps, theta_hat_all[:,0], label="m_hat", linewidth=1)
-    ax[1].legend()
-    ax[1].title.set_text("Param: Mass")
-
-    ax[2].plot(steps, theta_all[:,1], label="g", linewidth=1)
-    ax[2].plot(steps, theta_hat_all[:,1], label="g_hat", linewidth=1)
-    ax[2].legend()
-    ax[2].title.set_text("Param: Gravity")
-
-    u_all = np.array(u_all)
-    nsteps = len(u_all)
-    steps = np.arange(nsteps)
-    ax[3].plot(steps, u_all[:, 0], label="u1", linewidth=1)
-    ax[3].plot(steps, u_all[:, 1], label="u2", linewidth=1)
-    ax[3].plot(steps, u_all[:, 2], label="u3", linewidth=1)
-    ax[3].plot(steps, u_all[:, 3], label="u4", linewidth=1)
-    ax[3].legend()
-    ax[3].title.set_text("Controls")
+    for i in range(7):
+        ax[i+2].plot(steps, theta_all[:,i], label=f"param {i+1} gt", linewidth=1)
+        ax[i+2].plot(steps, theta_hat_all[:,i], label=f"param {i+1} est", linewidth=1)
+        ax[i+2].legend()
+        ax[i+2].title.set_text(f"Parameter {i+1} Tracking")
 
     plt.tight_layout()
     plt.suptitle(title)

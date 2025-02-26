@@ -412,7 +412,6 @@ class OnlineParamEst:
 
     def simulate_quadrotor_tracking_with_DEKA(self, NSIM: int =200): 
         # initialize quadrotor parameters
-        np.set_printoptions(suppress=False, precision=10)
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
         Ixy, Ixz, Iyz = self.quadrotor.J[0,1], self.quadrotor.J[0,2], self.quadrotor.J[1,2]
         theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
@@ -469,19 +468,15 @@ class OnlineParamEst:
         theta_all = []
         theta_hat_all = []
 
-        changing_steps = [50]#np.random.choice(range(20,180),size=2, replace=False)
+        changing_steps = [50, 100, 150]#np.random.choice(range(20,180),size=2, replace=False)
  
-        deka = DEKA_new(num_params=7,x0=theta_hat)
+        deka = DEKA_new(num_params=7,x0=theta_hat, damping=0.9, smoothing_factor=0.0)
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
-            # Process noise
-            process_noise_std = 0.02 * np.abs(theta)
-            theta += np.random.normal(0, process_noise_std, size=theta.shape)
-
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(1, 2)
+                update_scale = np.random.uniform(1, 1.5)
                 theta *= update_scale
 
             # update goals
@@ -495,7 +490,8 @@ class OnlineParamEst:
             u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)                    # at t=k
 
             # step
-            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)       # at t=k+1
+            process_noise_std = 0.001 * np.abs(x_curr)  # Process noise
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta) + np.random.normal(0, process_noise_std, size=(13,))  # at t=k+1
             
             # measurement noise
             measurement_noise_std = 0.05 * np.abs(x_curr)
@@ -503,20 +499,27 @@ class OnlineParamEst:
             # formulate measurement model
             A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
             b = self.quadrotor.get_force_vector(x_curr, u_curr, theta)
+
+            if i % 2 == 0:
+                measurement_noise_std = 0.005 * np.abs(b)
+                b += np.random.normal(0, measurement_noise_std, size=b.shape)
             
             # import pdb; pdb.set_trace()
             #print(deka.iterate(A,b)[0])
-            theta_hat = deka.iterate(A,b)[0].reshape(-1,)
+            theta_hat = deka.iterate(A,b, num_iterations=50, tol=0.05)[0].reshape(-1,)
+
+            #np.linalg.lstsq(A,b)[0].reshape(-1,)
+            
 
             print("step: ", i, "\n", 
-                "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
+                # "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
                   )
 
 
             x_curr = x_curr.reshape(x_curr.shape[0]).tolist() #TODO: x one step in front of controls
             u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
 
-            x_all.append(x_curr)
+            x_all.append(x_curr.copy())
             u_all.append(u_curr)
             theta_all.append(theta.copy())
             theta_hat_all.append(theta_hat.copy())
@@ -1220,6 +1223,8 @@ class OnlineParamEst:
     #     return x_all, u_all, theta_hat_all, theta_all
 
     def main(): 
+        np.set_printoptions(suppress=False, precision=10)
+
         parser = argparse.ArgumentParser(description="An online parameter estimation interface with different robots, control tasks, estimation methods.")
         parser.add_argument("--robot", type=str, required=True, help="choose from quadrotor, cartpole, double_pendulum")
         parser.add_argument("--task", type=str, required=True, help="choose from hover, tracking, control") 
