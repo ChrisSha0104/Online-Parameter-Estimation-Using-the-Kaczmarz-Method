@@ -28,15 +28,14 @@ class LMS:
 
         K = A @ Q
         self.theta_hat += K @ (b - A @ self.theta_hat)
-
 class DEKA_new:
     def __init__(
         self,
         num_params,
         x0=None,
-        damping=1,
-        regularization=1e-6,
-        smoothing_factor=0.05,
+        damping=0.9,
+        regularization=1e-30,
+        smoothing_factor=0.0,
     ):
         """
         DEKA solver with damping, regularization, and exponential smoothing.
@@ -58,7 +57,7 @@ class DEKA_new:
         self.regularization = regularization
         self.smoothing_factor = smoothing_factor
 
-    def iterate(self, A, b, x_0=None, num_iterations=40, tol=0.01):
+    def iterate(self, A, b, x_0=None, num_iterations=25, tol=1e-4):
         """
         Performs DEKA iterations on the system Ax = b using damping and regularization,
         then applies exponential smoothing to the final estimate.
@@ -73,37 +72,42 @@ class DEKA_new:
         Returns:
             np.ndarray: The smoothed solution vector x (num_params x 1).
         """
+        #print(A.shape, b.shape)
         if x_0 is not None:
             self.x_k = x_0.reshape(self.num_params, 1)
 
         # Create a mask to ignore rows where A is all zeros
         row_mask = np.any(A != 0, axis=1)  # True for nonzero rows, False for zero rows
         if not np.any(row_mask):  # If all rows are zero, return x_k immediately
-            print("A has only zero rows, returning current estimate.")
+           # print("A has only zero rows, returning current estimate.")
             return self.x_k
         A = A[row_mask]  # Keep only nonzero rows
         b = b[row_mask]  # Keep corresponding b values
+        alpha = 0.5
 
         for k in range(num_iterations):
             residual = b - A @ self.x_k
             if np.linalg.norm(residual) < tol:
-                print(f"tol reached in {k} iterations")
+                print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
                 break
 
             # Compute quantities needed for the update.
             res_norm_sq = np.linalg.norm(residual) ** 2
-            A_row_norms_sq = np.sum(A**2, axis=1) + 1e-10
+            A_row_norms_sq = np.sum(A**2, axis=1) + 1e-30
+            # import pdb; pdb.set_trace()
             max_ratio = np.max(np.abs(residual.flatten()) ** 2 / A_row_norms_sq)
             fro_norm_A_sq = np.linalg.norm(A, "fro") ** 2
-            epsilon_k = 0.5 * (max_ratio / res_norm_sq + 1 / fro_norm_A_sq)
+            epsilon_k = alpha * (max_ratio / res_norm_sq + 1 / fro_norm_A_sq)
 
             # Determine indices tau_k where the residual is significant.
-            tau_k = np.where((residual ** 2).squeeze() / A_row_norms_sq >= epsilon_k * res_norm_sq, 1, 0)
-            print(tau_k.sum())
+            tau_k = np.where(((residual ** 2).squeeze() / A_row_norms_sq) >= (epsilon_k * res_norm_sq * A_row_norms_sq), 1, 0)
+            # print("tau_k: ", tau_k)
+            # print(tau_k.sum())
 
             if tau_k.sum() == 0:
-                print("Empty tau_k at iteration", k)
-                break
+              #  print("Empty tau_k at iteration", k)
+                alpha *= 0.5
+                continue
 
             eta_k = tau_k.reshape(-1, 1) * residual # apply mask to residual
 
@@ -112,12 +116,13 @@ class DEKA_new:
             denom = np.linalg.norm(A_T_eta_k) ** 2 + self.regularization
             numerator = eta_k.T @ residual
             raw_update = (numerator / denom) * A_T_eta_k
+            # print("raw update: ", raw_update)
 
             # Apply damping (scale the update).
             update = self.damping * raw_update
 
             # Update the raw parameter estimate.
-            self.x_k = self.x_k + update
+            self.x_k = self.x_k + update# + 0.3 * (self.x_k - x_prev)
 
             # if k % 10 == 0 and np.linalg.norm(b - A @ self.x_k) < tol:
             #     print("residual new: ", np.linalg.norm(b - A @ self.x_k))
@@ -138,7 +143,6 @@ class DEKA_new:
         )
 
         return self.x_k_smooth, k
-
 class RLS:
     """RLS with adaptive forgetting factor (lambda)."""
 

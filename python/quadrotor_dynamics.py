@@ -117,6 +117,43 @@ class Quadrotor():
         xnormalized = xn[3:7]/norm(xn[3:7])  # normalize quaternion
         return np.hstack([xn[0:3], xnormalized, xn[7:13]])
     
+    def get_data_matrix_km(self, x_curr, dx):
+        a_x, a_y, a_z = dx[7:10]
+        a_p, a_q, a_r = dx[10:13]
+        w_x, w_y, w_z = x_curr[10:13]
+        
+        a_x = a_x * 1e4
+        a_y = a_y * 1e4
+        a_z = a_z * 1e4
+
+
+        A = np.array([
+            [a_x, 0, 0, 0, 0, 0, 0],  # fx equation (acceleration)
+            [a_y, 0, 0, 0, 0, 0, 0],  # fy equation
+            [a_z, 0, 0, 0, 0, 0, 0],  # fz equation
+            [0, a_p, a_q-w_x*w_z, a_r+w_x*w_y, -w_y*w_z, w_y**2+w_z**2, w_y*w_z],  # τx equation (angular acceleration)
+            [0, w_x*w_z, a_p+w_y*w_z, w_z**2-w_x**2, a_q, a_r-w_x*w_y, -w_x*w_z],  # τy equation
+            [0, -w_x*w_y, w_x**2-w_y**2, a_p-w_y*w_z, w_x*w_y, a_q+w_x*w_z, a_r]  # τz equation
+        ], dtype=np.float64)
+        return A
+    
+    def get_force_vector_km(self, x_curr, u_curr, theta):
+        R = self.qtoQ(x_curr[3:7])
+
+        F_b = np.array([[0], 
+                      [0],  
+                      [np.sum(u_curr) * self.kt]]) # TODO: fix this dim
+        F_w = R @ F_b
+        F_w[2] -= theta[0] * self.g
+
+        
+
+        tau_b = np.array([[self.el*self.kt*(-u_curr[0]-u_curr[1]+u_curr[2]+u_curr[3])], # - - + +
+                        [self.el*self.kt*(-u_curr[0]+u_curr[1]+u_curr[2]-u_curr[3])],  # - + + -
+                        [self.km*(-u_curr[0] + u_curr[1] - u_curr[2] + u_curr[3])]]) # - + - +
+        
+        return np.vstack([F_w, tau_b])
+
     def get_data_matrix(self, x_curr, dx):
         a_x, a_y, a_z = dx[7:10]
         a_p, a_q, a_r = dx[10:13]
@@ -130,7 +167,6 @@ class Quadrotor():
             [0, w_x*w_z, a_p+w_y*w_z, w_z**2-w_x**2, a_q, a_r-w_x*w_y, -w_x*w_z],  # τy equation
             [0, -w_x*w_y, w_x**2-w_y**2, a_p-w_y*w_z, w_x*w_y, a_q+w_x*w_z, a_r]  # τz equation
         ], dtype=np.float64)
-
         return A
     
     def get_force_vector(self, x_curr, u_curr, theta):
@@ -142,11 +178,14 @@ class Quadrotor():
         F_w = R @ F_b
         F_w[2] -= theta[0] * self.g
 
+        
+
         tau_b = np.array([[self.el*self.kt*(-u_curr[0]-u_curr[1]+u_curr[2]+u_curr[3])], # - - + +
                         [self.el*self.kt*(-u_curr[0]+u_curr[1]+u_curr[2]-u_curr[3])],  # - + + -
                         [self.km*(-u_curr[0] + u_curr[1] - u_curr[2] + u_curr[3])]]) # - + - +
+        
         return np.vstack([F_w, tau_b])
-
+    
     def get_hover_goals(self, theta):
         mass = theta[0]
 
