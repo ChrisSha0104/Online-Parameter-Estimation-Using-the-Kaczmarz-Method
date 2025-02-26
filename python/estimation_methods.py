@@ -34,9 +34,9 @@ class DEKA_new:
         self,
         num_params,
         x0=None,
-        damping=0.1,
+        damping=1,
         regularization=1e-6,
-        smoothing_factor=0.75,
+        smoothing_factor=0.05,
     ):
         """
         DEKA solver with damping, regularization, and exponential smoothing.
@@ -58,7 +58,7 @@ class DEKA_new:
         self.regularization = regularization
         self.smoothing_factor = smoothing_factor
 
-    def iterate(self, A, b, x_0=None, num_iterations=25, tol=0.05):
+    def iterate(self, A, b, x_0=None, num_iterations=40, tol=0.01):
         """
         Performs DEKA iterations on the system Ax = b using damping and regularization,
         then applies exponential smoothing to the final estimate.

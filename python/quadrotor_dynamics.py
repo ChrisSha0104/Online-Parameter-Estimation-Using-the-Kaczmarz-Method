@@ -77,7 +77,7 @@ class Quadrotor():
         #     x_nom = self.xg
         q = x_curr[3:7]
         phi = self.qtorp(self.L(self.qg).T @ q)
-        delta_x = np.hstack([x_curr[0:3]-self.rg, phi, x_curr[7:10]-self.vg, x_curr[10:13]-self.omgg])
+        delta_x = np.hstack([x_curr[0:3]-x_nom[0:3], phi, x_curr[7:10]-x_nom[7:10], x_curr[10:13]-x_nom[10:13]])
         return delta_x
 
     def E(self, q):
