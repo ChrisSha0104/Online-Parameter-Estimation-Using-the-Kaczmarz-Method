@@ -107,7 +107,8 @@ class OnlineParamEst:
         np.set_printoptions(suppress=False, precision=10)
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
         Ixy, Ixz, Iyz = self.quadrotor.J[0,1], self.quadrotor.J[0,2], self.quadrotor.J[1,2]
-        theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
+        # theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
+        theta = np.array([Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
         theta_hat = theta.copy()
         
         # get tasks goals
@@ -134,7 +135,10 @@ class OnlineParamEst:
 
         changing_steps = [50]#np.random.choice(range(20,180),size=2, replace=False)
  
-        rls = RLS(num_params=7)
+        rls = RLS(num_params=6)
+        n = 10
+        A_tot = np.zeros((3*n,6))
+        b_tot = np.zeros((3*n,1))
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
@@ -144,8 +148,8 @@ class OnlineParamEst:
 
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(1, 2)
-                theta *= update_scale
+                update_scale = np.random.uniform(2, 4)
+                theta[0] *= update_scale
 
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
@@ -156,18 +160,123 @@ class OnlineParamEst:
             u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)                    # at t=k
 
             # step
-            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)       # at t=k+1
-            
+            process_noise_std = 0.05 * np.abs(x_curr)  # Process noise
+
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)+ np.random.normal(0, process_noise_std, size=(13,))       # at t=k+1
             # formulate measurement model
             A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
             b = self.quadrotor.get_force_vector(x_curr, u_curr, theta)
+            measurement_noise_std = 0.05 * np.abs(b)
+            b += np.random.normal(0, measurement_noise_std, size = b.shape)
+
+            A_tot = np.roll(A_tot, shift=3, axis=0)
+            A_tot[:3] = A
+            b_tot = np.roll(b_tot, shift=3, axis=0)
+            b_tot[:3] = b
+
+            if i % 5 == 0 and i > 0:
+                theta_hat = rls.iterate(A_tot,b_tot).reshape(-1,)
             
-            # import pdb; pdb.set_trace()
-            theta_hat = rls.iterate(A,b).reshape(-1,)
-            # theta_hat = np.linalg.lstsq(A, b)[0]
+            # print(A@(theta.reshape(-1,1)))
+            # print(b)
 
             print("step: ", i, "\n", 
-                "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
+                # "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
+                  )
+
+
+            x_curr = x_curr.reshape(x_curr.shape[0]).tolist() #TODO: x one step in front of controls
+            u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
+
+            x_all.append(x_curr)
+            u_all.append(u_curr)
+            theta_all.append(theta.copy())
+            theta_hat_all.append(theta_hat.copy())
+
+        return x_all, u_all, theta_all, theta_hat_all
+    
+    def simulate_quadrotor_hover_with_DEKA(self, NSIM: int =200): #TODO: add RLS parameters here!
+        # initialize quadrotor parameters
+        np.set_printoptions(suppress=False, precision=10)
+        Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
+        Ixy, Ixz, Iyz = self.quadrotor.J[0,1], self.quadrotor.J[0,2], self.quadrotor.J[1,2]
+        # theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
+        theta = np.array([Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
+        theta_hat = theta.copy()
+        
+        # get tasks goals
+        x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
+        Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta)
+        Q, R = self.quadrotor_controller.get_QR_bryson()
+        self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+        # randomly perturb initial state
+        x0 = np.copy(x_nom)
+        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
+        print("Perturbed Intitial State: ")
+        print(x0)
+
+        # get initial control and state
+        u_curr = self.quadrotor_controller.compute(x0, x_nom, u_nom)
+        x_curr = np.copy(x0)
+
+        x_all = []
+        u_all = []
+        theta_all = []
+        theta_hat_all = []
+
+        changing_steps = [50]#np.random.choice(range(20,180),size=2, replace=False)
+ 
+        deka = DEKA(num_params=6, damping=0.1, regularization=1e-15, smoothing_factor=0.1)
+
+        n = 10
+
+        A_tot = np.zeros((3*n,6))
+        b_tot = np.zeros((3*n,1))
+
+        # simulate the dynamics with the LQR controller
+        for i in range(NSIM):
+            # noising the parameters
+            # if i % 10 == 0:
+            #     theta += np.random.normal(0, process_noise_std, size=theta.shape)
+
+            # Change system parameters at specific step
+            if i in changing_steps:
+                update_scale = np.random.uniform(2, 4)
+                theta[0] *= update_scale
+
+            # update goals
+            x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
+            Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta)
+            self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+            # compute controls
+            u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)                    # at t=k
+
+            # step
+            process_noise_std = 0.05 * np.abs(x_curr)  # Process noise
+
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)+ np.random.normal(0, process_noise_std, size=(13,))       # at t=k+1
+            # formulate measurement model
+            A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
+            b = self.quadrotor.get_force_vector(x_curr, u_curr, theta)
+            measurement_noise_std = 0.05 * np.abs(b)
+            b += np.random.normal(0, measurement_noise_std, size = b.shape)
+
+            A_tot = np.roll(A_tot, shift=3, axis=0)
+            A_tot[:3] = A
+            b_tot = np.roll(b_tot, shift=3, axis=0)
+            b_tot[:3] = b
+
+            if i % 5 == 0 and i > 0:
+                theta_hat = deka.iterate(A_tot,b_tot, num_iterations=int(9/6*(n**2)), tol=1e-5)[0].reshape(-1,)
+            
+            # print(A@(theta.reshape(-1,1)))
+            # print(b)
+
+            print("step: ", i, "\n", 
+                # "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
                   )
 
 
@@ -466,7 +575,7 @@ class OnlineParamEst:
 
         changing_steps = [50, 100, 150]#np.random.choice(range(20,180),size=2, replace=False)
  
-        deka = DEKA_new(num_params=7,x0=theta_hat, damping=0.9, smoothing_factor=0.0)
+        deka = DEKA_new(num_params=7,x0=theta_hat, damping=1.0, smoothing_factor=0.0)
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
@@ -479,6 +588,7 @@ class OnlineParamEst:
             x_nom = np.hstack([traj[i], x_nom_lower])
            # print("x_nom: ", x_nom)
             u_nom = (theta[0]*self.quadrotor.g/self.quadrotor.kt/4)*np.ones(4)
+            # theta_hat[0] *= 1e5
             Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta_hat)
             self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
 
@@ -487,22 +597,29 @@ class OnlineParamEst:
 
             # step
             process_noise_std = 0.001 * np.abs(x_curr)  # Process noise
-            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta) + np.random.normal(0, process_noise_std, size=(13,))  # at t=k+1
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)# + np.random.normal(0, process_noise_std, size=(13,))  # at t=k+1
             
             # measurement noise
             measurement_noise_std = 0.05 * np.abs(x_curr)
             x_curr += np.random.normal(0, measurement_noise_std, size = x_curr.shape)
             # formulate measurement model
             A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
+            # A[0] *= 1e5
             b = self.quadrotor.get_force_vector(x_curr, u_curr, theta)
 
-            if i % 2 == 0:
-                measurement_noise_std = 0.005 * np.abs(b)
-                b += np.random.normal(0, measurement_noise_std, size=b.shape)
+            # import pdb; pdb.set_trace()
+            print(A@(theta.reshape(-1,1)))
+            print(b)
+            import pdb; pdb.set_trace()
+
+            # if i % 2 == 0:
+            #     measurement_noise_std = 0.005 * np.abs(b)
+            #     b += np.random.normal(0, measurement_noise_std, size=b.shape)
             
             # import pdb; pdb.set_trace()
             #print(deka.iterate(A,b)[0])
-            theta_hat = deka.iterate(A,b, num_iterations=50, tol=0.05)[0].reshape(-1,)
+            theta_hat = deka.iterate(A,b, num_iterations=1000, tol=1e-3)[0].reshape(-1,)
+            # theta_hat[0] *= 1e-5
 
             #np.linalg.lstsq(A,b)[0].reshape(-1,)
             
@@ -1241,6 +1358,10 @@ class OnlineParamEst:
                 x_history, u_history, theta_history, theta_hat_history = getattr(ParamEst, method_name)()
                 title = f"Online Parameter Estimation for {args.robot} {args.task} with {args.method}"
                 visualize_trajectory_with_est(x_history, u_history, theta_history, theta_hat_history, title)
+                # theta_hat_deka_array = np.array(theta_hat_history)
+                # theta_deka_array = np.array(theta_history)
+                # visualize_all_parameter(theta_deka_array, theta_hat_deka_array)
+
         else: 
             print(f"Error: Method {method_name} not found. Use --help to see available option.")
 

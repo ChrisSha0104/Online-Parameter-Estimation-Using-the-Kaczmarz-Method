@@ -59,6 +59,27 @@ def visualize_trajectory_inertia(x_all, u_all, theta_all, title):
     plt.suptitle(title)
     plt.show()
 
+def visualize_all_parameter(theta_all, theta_hat_all):
+    t = np.arange(len(theta_all))  # time steps 0..N-1
+
+    fig, axs = plt.subplots(4, 2, figsize=(12, 10))
+    axs = axs.flatten()  # Make it a 1D list of axes for easy iteration
+
+    for j in range(7):
+        axs[j].plot(t, theta_hat_all[:, j], label=f'deka param {j}')
+        axs[j].plot(t, theta_all[:, j], '--', label=f'True param {j}')
+        axs[j].set_title(f'Parameter {j}')
+        axs[j].set_xlabel('Time Step')
+        axs[j].set_ylabel('Value')
+        axs[j].legend()
+        axs[j].grid(True)
+
+    # Hide the 8th subplot if you only have 7 params
+    axs[-1].set_visible(False)
+
+    plt.tight_layout()
+    plt.show()
+
 def visualize_trajectory(x_all, u_all, theta_all, title):
     # Set up the figure and axis for plotting
     fig, ax = plt.subplots(3, 1)
@@ -98,7 +119,7 @@ def visualize_trajectory(x_all, u_all, theta_all, title):
 
 def visualize_trajectory_with_est(x_all, u_all, theta_all, theta_hat_all, title):
     # Set up the figure and axis for plotting
-    fig, ax = plt.subplots(9, 1)
+    fig, ax = plt.subplots(8, 1)
 
     # Plot the trajectory
     x_all = np.array(x_all)
@@ -140,7 +161,7 @@ def visualize_trajectory_with_est(x_all, u_all, theta_all, theta_hat_all, title)
     theta_hat_all = np.array(theta_hat_all)
     nsteps = len(theta_all)
     steps = np.arange(nsteps)
-    for i in range(7):
+    for i in range(6):
         ax[i+2].plot(steps, theta_all[:,i], label=f"param {i+1} gt", linewidth=1)
         ax[i+2].plot(steps, theta_hat_all[:,i], label=f"param {i+1} est", linewidth=1)
         ax[i+2].legend()
