@@ -182,6 +182,7 @@ class OnlineParamEst:
         return x_all, u_all, theta_all, theta_hat_all
     
     def simulate_quadrotor_tracking_with_RLS(self, NSIM: int =200): 
+        np.random.seed(0) 
         # initialize quadrotor parameters
         np.set_printoptions(suppress=False, precision=10)
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
@@ -247,12 +248,10 @@ class OnlineParamEst:
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
             # processing noise
-            process_noise_std = 0.02 * np.abs(theta)
-            theta += np.random.normal(0, process_noise_std, size=theta.shape)
-
+            
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(1, 2)
+                update_scale = np.random.uniform(1, 2, size = theta.shape)
                 theta *= update_scale
 
             # update goals
@@ -268,9 +267,11 @@ class OnlineParamEst:
             # step
             x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)       # at t=k+1
             
+            process_noise_std = 0.001 * np.abs(x_curr)  # Process noise
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta) + np.random.normal(0, process_noise_std, size=(13,))  # at t=k+1
             # measurement noise
             measurement_noise_std = 0.05 * np.abs(x_curr)
-            x_curr += np.random.normal(0, measurement_noise_std, size=x_curr.shape)
+            x_curr += np.random.normal(0, measurement_noise_std, size = x_curr.shape)
 
             # formulate measurement model
             A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
@@ -278,7 +279,6 @@ class OnlineParamEst:
             
             # import pdb; pdb.set_trace()
             theta_hat = rls.iterate(A,b).reshape(-1,)
-
             print("step: ", i, "\n", 
                 "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
                   )
@@ -295,6 +295,7 @@ class OnlineParamEst:
         return x_all, u_all, theta_all, theta_hat_all
 
     def simulate_quadrotor_tracking_with_EKF(self, NSIM: int =200): 
+        np.random.seed(0) 
         # initialize quadrotor parameters
         np.set_printoptions(suppress=False, precision=10)
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
@@ -361,14 +362,10 @@ class OnlineParamEst:
         ekf = EKF(num_params=7, process_noise=Q_ekf, measurement_noise=R_ekf)
 
         # simulate the dynamics with the LQR controller
-        for i in range(NSIM):
-            # processing noise
-            process_noise_std = 0.02 * np.abs(theta)
-            theta += np.random.normal(0, process_noise_std, size=theta.shape)
-
+        for i in range(NSIM):      
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(1, 2)
+                update_scale = np.random.uniform(1, 2, size = theta.shape)
                 theta *= update_scale
 
             # update goals
@@ -382,11 +379,11 @@ class OnlineParamEst:
             u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)                    # at t=k
 
             # step
-            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)       # at t=k+1
-            
+            process_noise_std = 0.001 * np.abs(x_curr)  # Process noise
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta) + np.random.normal(0, process_noise_std, size=(13,))  # at t=k+1
             # measurement noise
             measurement_noise_std = 0.05 * np.abs(x_curr)
-            x_curr += np.random.normal(0, measurement_noise_std, size=x_curr.shape)
+            x_curr += np.random.normal(0, measurement_noise_std, size = x_curr.shape)
 
             # formulate measurement model
             A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
@@ -394,7 +391,6 @@ class OnlineParamEst:
             
             # import pdb; pdb.set_trace()
             theta_hat = ekf.iterate(A,b).reshape(-1,)
-
             print("step: ", i, "\n", 
                 "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
                   )
