@@ -507,11 +507,12 @@ class DEKA:
         if not np.any(row_mask):  # If all rows are zero, return x_k immediately
             print("A has only zero rows, returning current estimate.")
             return self.x_k
+
         A = A[row_mask]  # Keep only nonzero rows
         b = b[row_mask]  # Keep corresponding b values
 
         for k in range(num_iterations):
-            residual = b - A @ self.x_k
+            residual = (b - A @ self.x_k).squeeze()
             if np.linalg.norm(residual) < tol:
                 print("tol reached")
                 break
@@ -519,18 +520,16 @@ class DEKA:
             # Compute quantities needed for the update.
             res_norm_sq = np.linalg.norm(residual) ** 2
             A_row_norms_sq = np.sum(A**2, axis=1) + 1e-10
-            max_ratio = np.max(np.abs(residual.flatten()) ** 2 / A_row_norms_sq)
+            max_ratio = np.max(np.abs(residual) ** 2 / A_row_norms_sq)
             fro_norm_A_sq = np.linalg.norm(A, "fro") ** 2
             epsilon_k = 0.5 * (max_ratio / res_norm_sq + 1 / fro_norm_A_sq)
 
-            # Determine indices tau_k where the residual is significant.
-            tau_k = np.where((residual ** 2).squeeze() / A_row_norms_sq >= epsilon_k * res_norm_sq, 1, 0)
+            # Determine indices tau_k where the residual is significant and applies mask to residual for eta_k
+            eta_k = np.where(residual ** 2 / A_row_norms_sq >= epsilon_k * res_norm_sq, residual, 0).reshape(-1, 1)
 
-            if tau_k.sum() == 0:
+            if eta_k.sum() == 0:
                 print("Empty tau_k at iteration", k)
                 break
-
-            eta_k = tau_k.reshape(-1, 1) * residual # apply mask to residual
 
             # Compute the update direction.
             A_T_eta_k = A.T @ eta_k
@@ -543,16 +542,6 @@ class DEKA:
 
             # Update the raw parameter estimate.
             self.x_k = self.x_k + update
-
-            # if k % 10 == 0 and np.linalg.norm(b - A @ self.x_k) < tol:
-            #     print("residual new: ", np.linalg.norm(b - A @ self.x_k))
-            #     print("residual previous: ", np.linalg.norm(b - A @ x_prev))
-            #     if k < 10:
-            #         print("DEKA converged in", k, "iterations")
-            #         return self.x_k/3
-            #     else:
-            #         print("DEKA converged in", k, "iterations")
-            #         return self.x_k
 
         exit_status = (k == (num_iterations-1))
         # Exponential smoothing to blend the new raw estimate into a smoothed version
