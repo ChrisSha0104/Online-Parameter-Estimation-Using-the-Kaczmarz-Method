@@ -264,11 +264,15 @@ class EKF:
 
 
 class RK:
-    def __init__(self, alpha=0.99, epsilon=1e-8):
+    def __init__(self, num_params, alpha=0.99, epsilon=1e-8, x0=None):
+        self.num_params = num_params
         self.alpha = alpha
         self.epsilon = epsilon  # Small value to prevent division by zero
+        self.x = (
+            x0.reshape(num_params, 1) if x0 is not None else np.zeros((num_params, 1))
+        )
 
-    def iterate(self, A, b, x0, num_iterations, tol=0.01):
+    def iterate(self, A, b, x0=None, num_iterations=1000, tol=0.01):
         """
         A: (num_states, num_param)
         x: (num_param, 1)
@@ -278,9 +282,15 @@ class RK:
         self.b = b
         self.m = A.shape[0]  # m is the number of rows, n is the number of columns
         self.n = A.shape[1]
-        self.x = np.array([x0]).reshape(self.n, 1)  # initial estimate of solution
 
-        for _ in range(num_iterations):
+        max_iter = 0
+        
+        if x0 is not None:
+            self.x = x0.reshape(self.num_params, 1)
+
+        for _ in range(num_iterations): 
+            max_iter += 1
+
             # Compute exponential weighting for the rows
             row_norms = np.linalg.norm(A, axis=1) ** 2
 
@@ -326,7 +336,8 @@ class RK:
 
             increment = increment.reshape(self.n, 1)
             self.x = self.x + increment
-        return self.x
+
+        return self.x, max_iter
 
 
 class REK:
@@ -507,6 +518,9 @@ class DEKA:
         Returns:
             np.ndarray: The smoothed solution vector x (num_params x 1).
         """
+
+        max_iter = 0
+
         if x_0 is not None:
             self.x_k = x_0.reshape(self.num_params, 1)
 
@@ -520,6 +534,8 @@ class DEKA:
         b = b[row_mask]  # Keep corresponding b values
 
         for k in range(num_iterations):
+            max_iter += 1
+
             residual = (b - A @ self.x_k).squeeze()
             # import pdb; pdb.set_trace()
             if np.linalg.norm(residual) < self.tol:
@@ -567,7 +583,7 @@ class DEKA:
             + (1 - self.smoothing_factor) * self.x_k
         )
 
-        return self.x_k_smooth, exit_status
+        return self.x_k_smooth, exit_status, max_iter
 
 
 # class TestDEKA(unittest.TestCase):
