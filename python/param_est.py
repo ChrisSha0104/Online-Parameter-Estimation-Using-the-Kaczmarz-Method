@@ -148,8 +148,8 @@ class OnlineParamEst:
 
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(2, 4)
-                theta[0] *= update_scale
+                update_scale = np.random.uniform(2, 4, size=theta[0:2].shape)
+                theta[0:2] *= update_scale
 
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals()
@@ -245,8 +245,8 @@ class OnlineParamEst:
 
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(2, 4)
-                theta[0] *= update_scale
+                update_scale = np.random.uniform(2, 4, size=theta[0:2].shape)
+                theta[0:2] *= update_scale
 
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals()
@@ -372,6 +372,99 @@ class OnlineParamEst:
 
         return x_all, u_all, theta_all, theta_hat_all
     
+    def simulate_quadrotor_hover_with_EKF(self, NSIM: int =200): #TODO: add RLS parameters here!
+        # initialize quadrotor parameters
+        np.set_printoptions(suppress=False, precision=10)
+        Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
+        Ixy, Ixz, Iyz = self.quadrotor.J[0,1], self.quadrotor.J[0,2], self.quadrotor.J[1,2]
+        # theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
+        theta = np.array([Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
+        theta_hat = theta.copy()
+        
+        # get tasks goals
+        x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
+        Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta)
+        Q, R = self.quadrotor_controller.get_QR_bryson()
+        self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+        # randomly perturb initial state
+        x0 = np.copy(x_nom)
+        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
+        print("Perturbed Intitial State: ")
+        print(x0)
+
+        # get initial control and state
+        u_curr = self.quadrotor_controller.compute(x0, x_nom, u_nom)
+        x_curr = np.copy(x0)
+
+        x_all = []
+        u_all = []
+        theta_all = []
+        theta_hat_all = []
+
+        changing_steps = [50]#np.random.choice(range(20,180),size=2, replace=False)
+
+      
+        n = 10
+        A_tot = np.zeros((3*n,6))
+        b_tot = np.zeros((3*n,1))
+        Q_ekf = 1e-4 * np.eye(6)
+        R_ekf = 1e-4 * np.eye(3*n)
+
+        ekf = EKF(num_params=6, process_noise=Q_ekf, measurement_noise=R_ekf)
+        # simulate the dynamics with the LQR controller
+        for i in range(NSIM):
+            # noising the parameters
+            # if i % 10 == 0:
+            #     theta += np.random.normal(0, process_noise_std, size=theta.shape)
+
+            # Change system parameters at specific step
+            if i in changing_steps:
+                update_scale = np.random.uniform(2, 4,size=theta[0:2].shape)
+                theta[0:2] *= update_scale
+
+            # update goals
+            x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
+            Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta)
+            self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
+
+            # compute controls
+            u_curr = self.quadrotor_controller.compute(x_curr, x_nom, u_nom)                    # at t=k
+
+            # step
+            process_noise_std = 0.05 * np.abs(x_curr)  # Process noise
+
+            x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)+ np.random.normal(0, process_noise_std, size=(13,))       # at t=k+1
+            # formulate measurement model
+            A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
+            b = self.quadrotor.get_force_vector(x_curr, u_curr, theta)
+            measurement_noise_std = 0.05 * np.abs(b)
+            b += np.random.normal(0, measurement_noise_std, size = b.shape)
+
+            A_tot = np.roll(A_tot, shift=3, axis=0)
+            A_tot[:3] = A
+            b_tot = np.roll(b_tot, shift=3, axis=0)
+            b_tot[:3] = b
+
+            if i % 5 == 0 and i > 0:
+                theta_hat = ekf.iterate(A_tot,b_tot).reshape(-1,)
+
+
+            print("step: ", i, "\n", 
+                # "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
+                  )
+
+
+            x_curr = x_curr.reshape(x_curr.shape[0]).tolist() #TODO: x one step in front of controls
+            u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
+
+            x_all.append(x_curr)
+            u_all.append(u_curr)
+            theta_all.append(theta.copy())
+            theta_hat_all.append(theta_hat.copy())
+
+        return x_all, u_all, theta_all, theta_hat_all
 
     def simulate_quadrotor_hover_with_DEKA(self, NSIM: int =200): #TODO: add RLS parameters here!
         # initialize quadrotor parameters
@@ -421,8 +514,8 @@ class OnlineParamEst:
 
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(2, 4)
-                theta[0] *= update_scale
+                update_scale = np.random.uniform(2, 4, size = theta[0:2].shape)
+                theta[0:2] *= update_scale
 
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
