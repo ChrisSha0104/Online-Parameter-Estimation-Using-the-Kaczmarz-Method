@@ -104,7 +104,7 @@ class OnlineParamEst:
     #     return x_all, u_all, theta_all 
     
     def simulate_quadrotor_hover_with_RLS(self, NSIM: int =200): #TODO: add RLS parameters here!
-        np.random.seed(0)
+        np.random.seed(42)
         self.quadrotor = Quadrotor()
         self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
         # initialize quadrotor parameters
@@ -204,7 +204,7 @@ class OnlineParamEst:
         return x_all, u_all, theta_all, theta_hat_all
     
     def simulate_quadrotor_hover_with_KF(self, NSIM: int =200): #TODO: add RLS parameters here!
-        np.random.seed(0)
+        np.random.seed(42)
         self.quadrotor = Quadrotor()
         self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
         # initialize quadrotor parameters
@@ -480,7 +480,7 @@ class OnlineParamEst:
     #     return x_all, u_all, theta_all, theta_hat_all
 
     def simulate_quadrotor_hover_with_DEKA(self, NSIM: int =200): #TODO: add RLS parameters here!
-        np.random.seed(0)
+        np.random.seed(42)
         self.quadrotor = Quadrotor()
         self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
 
