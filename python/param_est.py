@@ -29,6 +29,7 @@ class OnlineParamEst:
         self.double_pendulum_controller = LQRController_pen() #TODO: use one controller
 
     def simulate_quadrotor_hover_with_Naive_MPC(self, update_status: str, NSIM: int =200):
+        
         np.set_printoptions(suppress=False, precision=10)
         # initialize quadrotor parameters
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
@@ -103,6 +104,9 @@ class OnlineParamEst:
         return x_all, u_all, theta_all 
     
     def simulate_quadrotor_hover_with_RLS(self, NSIM: int =200): #TODO: add RLS parameters here!
+        np.random.seed(0)
+        self.quadrotor = Quadrotor()
+        self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
         # initialize quadrotor parameters
         np.set_printoptions(suppress=False, precision=10)
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
@@ -113,7 +117,7 @@ class OnlineParamEst:
         
         # get tasks goals
         x_nom, u_nom = self.quadrotor.get_hover_goals()
-        Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta)
+        Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta_hat)
         Q, R = self.quadrotor_controller.get_QR_bryson()
         self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
 
@@ -148,8 +152,9 @@ class OnlineParamEst:
 
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(2, 4, size=theta[0:2].shape)
-                theta[0:2] *= update_scale
+                for j in range(6):
+                    update_scale = np.random.uniform(100, 500)
+                    theta[j] *= update_scale
 
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals()
@@ -196,6 +201,9 @@ class OnlineParamEst:
         return x_all, u_all, theta_all, theta_hat_all
     
     def simulate_quadrotor_hover_with_KF(self, NSIM: int =200): #TODO: add RLS parameters here!
+        np.random.seed(0)
+        self.quadrotor = Quadrotor()
+        self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
         # initialize quadrotor parameters
         np.set_printoptions(suppress=False, precision=10)
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
@@ -231,8 +239,8 @@ class OnlineParamEst:
         n = 10
         A_tot = np.zeros((3*n,6))
         b_tot = np.zeros((3*n,1))
-        Q_ekf = 1e-4 * np.eye(len(theta))
-        R_ekf = 1e-4 * np.eye(3*n)
+        Q_ekf = 1e-3 * np.eye(len(theta))
+        R_ekf = 1e-3 * np.eye(3*n)
 
 
         kf = EKF(num_params=6, process_noise=Q_ekf, measurement_noise=R_ekf)
@@ -245,8 +253,9 @@ class OnlineParamEst:
 
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(2, 4, size=theta[0:2].shape)
-                theta[0:2] *= update_scale
+                for j in range(6):
+                    update_scale = np.random.uniform(100, 500)
+                    theta[j] *= update_scale
 
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals()
@@ -280,7 +289,6 @@ class OnlineParamEst:
             # print("step: ", i, "\n", 
                 # "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
                 #   )
-
 
             x_curr = x_curr.reshape(x_curr.shape[0]).tolist() #TODO: x one step in front of controls
             u_curr = u_curr.reshape(u_curr.shape[0]).tolist()
@@ -467,6 +475,10 @@ class OnlineParamEst:
         return x_all, u_all, theta_all, theta_hat_all
 
     def simulate_quadrotor_hover_with_DEKA(self, NSIM: int =200): #TODO: add RLS parameters here!
+        np.random.seed(0)
+        self.quadrotor = Quadrotor()
+        self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
+
         # initialize quadrotor parameters
         np.set_printoptions(suppress=False, precision=10)
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
@@ -499,7 +511,7 @@ class OnlineParamEst:
 
         changing_steps = [50]#np.random.choice(range(20,180),size=2, replace=False)
  
-        deka = DEKA(num_params=6, damping=0.1, regularization=1e-15, smoothing_factor=0.1)
+        deka = DEKA(num_params=6, x0=theta.reshape(-1,1), damping=0.1, regularization=1e-15, smoothing_factor=0.1, tol_max=1e-3, tol_min=1e-6)
 
         n = 10
 
@@ -514,12 +526,13 @@ class OnlineParamEst:
 
             # Change system parameters at specific step
             if i in changing_steps:
-                update_scale = np.random.uniform(2, 4, size = theta[0:2].shape)
-                theta[0:2] *= update_scale
+                for j in range(6):
+                    update_scale = np.random.uniform(100, 500)
+                    theta[j] *= update_scale
 
             # update goals
             x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
-            Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta)
+            Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta_hat)
             self.quadrotor_controller.update_linearized_dynamics(Anp, Bnp, Q, R)
 
             # compute controls
@@ -535,20 +548,30 @@ class OnlineParamEst:
             measurement_noise_std = 0.05 * np.abs(b)
             b += np.random.normal(0, measurement_noise_std, size = b.shape)
 
+            # print(A@(theta.reshape(-1,1)))
+            # print(b)
+            # import pdb; pdb.set_trace()
+
             A_tot = np.roll(A_tot, shift=3, axis=0)
             A_tot[:3] = A
             b_tot = np.roll(b_tot, shift=3, axis=0)
             b_tot[:3] = b
 
             if i % 5 == 0 and i > 0:
-                theta_hat = deka.iterate(A_tot,b_tot, num_iterations=int(9/6*(n**2)), tol=1e-5)[0].reshape(-1,)
-            
+                print("step ", i)
+                theta_hat_prev = theta_hat
+                theta_hat = deka.iterate(A_tot,b_tot, num_iterations=int(9/6*(n**2)))[0].reshape(-1,)
+                
+                if (np.linalg.norm(theta_hat - theta_hat_prev) / np.linalg.norm(theta_hat)) > 0.2:
+                    theta_hat = 0.4 * theta_hat + 0.6 * theta_hat_prev
+                    print(f"smoothed at step {i} with value {(np.linalg.norm(theta_hat - theta_hat_prev) / np.linalg.norm(theta_hat))}: ")
+
             # print(A@(theta.reshape(-1,1)))
             # print(b)
 
             # print("step: ", i, "\n", 
-                # "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
-                #   )
+            #     # "prediction_err: ", np.linalg.norm(theta-theta_hat)/7, "\n"
+            #     )
 
 
             x_curr = x_curr.reshape(x_curr.shape[0]).tolist() #TODO: x one step in front of controls

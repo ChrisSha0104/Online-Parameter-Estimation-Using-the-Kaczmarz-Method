@@ -91,7 +91,7 @@ class Quadrotor():
     def quad_dynamics(self, x, u, theta):
         mass = self.mass
         Ixx,Ixy,Ixz,Iyy,Iyz,Izz = theta[:6]
-        self.J = np.array([[Ixx, Ixy, Ixz],
+        J = np.array([[Ixx, Ixy, Ixz],
                            [Ixy, Iyy, Iyz],
                            [Ixz, Iyz, Izz]], dtype=np.float64)
 
@@ -104,7 +104,7 @@ class Quadrotor():
         dr = v
         dq = 0.5*self.L(q)@self.H@omg
         dv = np.array([0, 0, -self.g]) + (1/mass)*Q@np.array([[0, 0, 0, 0], [0, 0, 0, 0], [self.kt, self.kt, self.kt, self.kt]])@u
-        domg = inv(self.J)@(-self.hat(omg)@self.J@omg + np.array([[-self.el*self.kt, -self.el*self.kt, self.el*self.kt, self.el*self.kt], [-self.el*self.kt, self.el*self.kt, self.el*self.kt, -self.el*self.kt], [-self.km, self.km, -self.km, self.km]])@u)
+        domg = inv(J)@(-self.hat(omg)@J@omg + np.array([[-self.el*self.kt, -self.el*self.kt, self.el*self.kt, self.el*self.kt], [-self.el*self.kt, self.el*self.kt, self.el*self.kt, -self.el*self.kt], [-self.km, self.km, -self.km, self.km]])@u)
         return np.hstack([dr, dq, dv, domg])
 
     # RK4 integration with zero-order hold on u
@@ -145,8 +145,6 @@ class Quadrotor():
                       [np.sum(u_curr) * self.kt]]) # TODO: fix this dim
         F_w = R @ F_b
         F_w[2] -= theta[0] * self.g
-
-        
 
         tau_b = np.array([[self.el*self.kt*(-u_curr[0]-u_curr[1]+u_curr[2]+u_curr[3])], # - - + +
                         [self.el*self.kt*(-u_curr[0]+u_curr[1]+u_curr[2]-u_curr[3])],  # - + + -

@@ -146,7 +146,7 @@ class DEKA_new:
 class RLS:
     """RLS with adaptive forgetting factor (lambda)."""
 
-    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.85, c=1000):
+    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.5, c=1000):
         """
         :param num_params: Number of parameters to estimate.
         :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
@@ -467,6 +467,8 @@ class DEKA:
         damping=0.1,
         regularization=1e-6,
         smoothing_factor=0.9,
+        tol_max=1e-4,
+        tol_min=1e-7,
     ):
         """
         DEKA solver with damping, regularization, and exponential smoothing.
@@ -487,8 +489,10 @@ class DEKA:
         self.damping = damping
         self.regularization = regularization
         self.smoothing_factor = smoothing_factor
+        self.tol = tol_max
+        self.tol_min = tol_min
 
-    def iterate(self, A, b, x_0=None, num_iterations=1000, tol=1e-4):
+    def iterate(self, A, b, x_0=None, num_iterations=1000):
         """
         Performs DEKA iterations on the system Ax = b using damping and regularization,
         then applies exponential smoothing to the final estimate.
@@ -517,13 +521,17 @@ class DEKA:
 
         for k in range(num_iterations):
             residual = (b - A @ self.x_k).squeeze()
-            if np.linalg.norm(residual) < tol:
-                # print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
+            # import pdb; pdb.set_trace()
+            if np.linalg.norm(residual) < self.tol:
+                print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
+                # import pdb; pdb.set_trace()
+                if self.tol > self.tol_min:
+                    self.tol *= 0.5
                 break
 
             # Compute quantities needed for the update.
             res_norm_sq = np.linalg.norm(residual) ** 2
-            A_row_norms_sq = np.sum(A**2, axis=1) + 1e-10
+            A_row_norms_sq = np.sum(A**2, axis=1) + 1e-10 # (18,1)
             max_ratio = np.max(np.abs(residual) ** 2 / A_row_norms_sq)
             fro_norm_A_sq = np.linalg.norm(A, "fro") ** 2
             epsilon_k = 0.5 * (max_ratio / res_norm_sq + 1 / fro_norm_A_sq)
@@ -548,8 +556,10 @@ class DEKA:
             self.x_k = self.x_k + update
 
         exit_status = (k == (num_iterations-1))
-        # if exit_status:
-            # print("max iter reached")
+        if exit_status:
+            if self.tol < self.tol_min:
+                self.tol *= 2
+            print("max iter reached")
 
         # Exponential smoothing to blend the new raw estimate into a smoothed version
         self.x_k_smooth = (
