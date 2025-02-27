@@ -499,7 +499,7 @@ class DEKA:
         self.regularization = regularization
         self.smoothing_factor = smoothing_factor
 
-    def iterate(self, A, b, x_0=None, num_iterations=1000, tol=1e-4):
+    def iterate(self, A, b, x_0=None, num_iterations=5, tol=1e-4):
         """
         Performs DEKA iterations on the system Ax = b using damping and regularization,
         then applies exponential smoothing to the final estimate.
