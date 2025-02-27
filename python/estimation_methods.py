@@ -146,7 +146,7 @@ class DEKA_new:
 class RLS:
     """RLS with adaptive forgetting factor (lambda)."""
 
-    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.7, c=1000):
+    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.85, c=1000):
         """
         :param num_params: Number of parameters to estimate.
         :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
@@ -509,7 +509,7 @@ class DEKA:
         # Create a mask to ignore rows where A is all zeros
         row_mask = np.any(A != 0, axis=1)  # True for nonzero rows, False for zero rows
         if not np.any(row_mask):  # If all rows are zero, return x_k immediately
-            print("A has only zero rows, returning current estimate.")
+            # print("A has only zero rows, returning current estimate.")
             return self.x_k
 
         A = A[row_mask]  # Keep only nonzero rows
@@ -518,7 +518,7 @@ class DEKA:
         for k in range(num_iterations):
             residual = (b - A @ self.x_k).squeeze()
             if np.linalg.norm(residual) < tol:
-                print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
+                # print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
                 break
 
             # Compute quantities needed for the update.
@@ -532,7 +532,7 @@ class DEKA:
             eta_k = np.where(residual ** 2 / A_row_norms_sq >= epsilon_k * res_norm_sq, residual, 0).reshape(-1, 1)
 
             if eta_k.sum() == 0:
-                print("Empty tau_k at iteration", k)
+                # print("Empty tau_k at iteration", k)
                 break
 
             # Compute the update direction.
@@ -548,8 +548,8 @@ class DEKA:
             self.x_k = self.x_k + update
 
         exit_status = (k == (num_iterations-1))
-        if exit_status:
-            print("max iter reached")
+        # if exit_status:
+            # print("max iter reached")
 
         # Exponential smoothing to blend the new raw estimate into a smoothed version
         self.x_k_smooth = (

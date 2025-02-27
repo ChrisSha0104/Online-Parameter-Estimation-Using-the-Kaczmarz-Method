@@ -184,7 +184,7 @@ class Quadrotor():
         
         return tau_b#np.vstack([F_w, tau_b])
     
-    def get_hover_goals(self, theta):
+    def get_hover_goals(self, theta=None):
         # mass = theta[0]
         mass = self.mass
 
