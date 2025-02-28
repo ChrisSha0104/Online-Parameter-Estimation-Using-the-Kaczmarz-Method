@@ -143,11 +143,10 @@ class DEKA_new:
         )
 
         return self.x_k_smooth, k
-
 class RLS:
     """RLS with adaptive forgetting factor (lambda)."""
 
-    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.6, c=1000):
+    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.5, c=1000):
         """
         :param num_params: Number of parameters to estimate.
         :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
@@ -476,7 +475,7 @@ class DEKA:
         self,
         num_params,
         x0=None,
-        damping=0.9,
+        damping=0.1,
         regularization=1e-6,
         smoothing_factor=0.9,
         tol_max=1e-4,
@@ -542,8 +541,8 @@ class DEKA:
             if np.linalg.norm(residual) < self.tol:
                 # print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
                 # import pdb; pdb.set_trace()
-                # if self.tol > self.tol_min:
-                    # self.tol *= 0.5
+                if self.tol > self.tol_min:
+                    self.tol *= 0.5
                 break
 
             # Compute quantities needed for the update.
@@ -573,10 +572,10 @@ class DEKA:
             self.x_k = self.x_k + update
 
         exit_status = (k == (num_iterations-1))
-        # if exit_status:
-            # if self.tol < self.tol_min:
-                # self.tol *= 2
-            # print("max iter reached")
+        if exit_status:
+            if self.tol < self.tol_min:
+                self.tol *= 2
+            print("max iter reached")
 
         # Exponential smoothing to blend the new raw estimate into a smoothed version
         self.x_k_smooth = (
@@ -586,6 +585,112 @@ class DEKA:
 
         return self.x_k_smooth, exit_status, max_iter
 
+class DEKA_tmp:
+    def __init__(
+        self,
+        num_params,
+        x0=None,
+        damping=0.1,
+        regularization=1e-6,
+        smoothing_factor=0.9,
+    ):
+        """
+        DEKA solver with damping, regularization, and exponential smoothing.
+
+        Args:
+            num_params (int): Number of parameters to estimate.
+            x0 (np.ndarray): Initial guess for x (num_params x 1). Defaults to zeros.
+            damping (float): Damping factor to scale the update (e.g., 0.1).
+            regularization (float): Small constant added to denominator for stability.
+            smoothing_factor (float): Exponential smoothing factor in [0, 1).
+                                      Closer to 1 means more smoothing.
+        """
+        self.num_params = num_params
+        self.x_k = (
+            x0.reshape(num_params, 1) if x0 is not None else np.zeros((num_params, 1))
+        )
+        self.x_k_smooth = self.x_k.copy()
+        self.damping = damping
+        self.regularization = regularization
+        self.smoothing_factor = smoothing_factor
+
+    def iterate(self, A, b, x_0=None, num_iterations=1000, tol=1e-4):
+        """
+        Performs DEKA iterations on the system Ax = b using damping and regularization,
+        then applies exponential smoothing to the final estimate.
+
+        Args:
+            A (np.ndarray): Matrix A (num_rows x num_params).
+            b (np.ndarray): Vector b (num_rows x 1).
+            x_0 (np.ndarray): Optional new initial guess for x (num_params x 1).
+            num_iterations (int): Maximum number of iterations.
+            tol (float): Convergence tolerance based on the residual norm.
+
+        Returns:
+            np.ndarray: The smoothed solution vector x (num_params x 1).
+        """
+
+        max_iter = 0
+
+        if x_0 is not None:
+            self.x_k = x_0.reshape(self.num_params, 1)
+
+        # Create a mask to ignore rows where A is all zeros
+        row_mask = np.any(A != 0, axis=1)  # True for nonzero rows, False for zero rows
+        if not np.any(row_mask):  # If all rows are zero, return x_k immediately
+            # print("A has only zero rows, returning current estimate.")
+            return self.x_k
+
+        A = A[row_mask]  # Keep only nonzero rows
+        b = b[row_mask]  # Keep corresponding b values
+
+        for k in range(num_iterations):
+            max_iter += 1
+
+            residual = (b - A @ self.x_k).squeeze()
+            if np.linalg.norm(residual) < tol:
+                # print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
+                break
+
+            # Compute quantities needed for the update.
+            res_norm_sq = np.linalg.norm(residual) ** 2
+            A_row_norms_sq = np.sum(A**2, axis=1) + 1e-10
+            max_ratio = np.max(np.abs(residual) ** 2 / A_row_norms_sq)
+            fro_norm_A_sq = np.linalg.norm(A, "fro") ** 2
+            epsilon_k = 0.5 * (max_ratio / res_norm_sq + 1 / fro_norm_A_sq)
+
+            # Determine indices tau_k where the residual is significant and applies mask to residual for eta_k
+            eta_k = np.where(residual ** 2 / A_row_norms_sq >= epsilon_k * res_norm_sq, residual, 0).reshape(-1, 1)
+
+            if eta_k.sum() == 0:
+                # print("Empty tau_k at iteration", k)
+                break
+
+            # Compute the update direction.
+            A_T_eta_k = A.T @ eta_k
+            denom = np.linalg.norm(A_T_eta_k) ** 2 + self.regularization
+            numerator = eta_k.T @ residual
+            raw_update = (numerator / denom) * A_T_eta_k
+
+            # Apply damping (scale the update).
+            update = self.damping * raw_update
+
+            # Update the raw parameter estimate.
+            self.x_k = self.x_k + update
+
+        exit_status = (k == (num_iterations - 1))
+        # if exit_status:
+        #     print("max iter reached")
+
+        # Exponential smoothing to blend the new raw estimate into a smoothed version
+        self.x_k_smooth = (
+            self.smoothing_factor * self.x_k_smooth
+            + (1 - self.smoothing_factor) * self.x_k
+        )
+
+        self.x_k = self.x_k_smooth
+
+        return self.x_k_smooth, exit_status, max_iter
 
 # class TestDEKA(unittest.TestCase):
 # def test_square_matrix(self):
