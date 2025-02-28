@@ -104,7 +104,7 @@ class OnlineParamEst:
     #     return x_all, u_all, theta_all 
     
     def simulate_quadrotor_hover_with_RLS(self, NSIM: int =200): #TODO: add RLS parameters here!
-        np.random.seed(42)
+        np.random.seed(3)
         self.quadrotor = Quadrotor()
         self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
         # initialize quadrotor parameters
@@ -114,7 +114,7 @@ class OnlineParamEst:
         # theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
         theta = np.array([Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
         theta_hat = theta.copy()
-        print("RLS theta: ", theta)
+       # print("RLS theta: ", theta)
         
         # get tasks goals
         x_nom, u_nom = self.quadrotor.get_hover_goals()
@@ -124,7 +124,7 @@ class OnlineParamEst:
 
         # randomly perturb initial state
         x0 = np.copy(x_nom)
-        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[0:3] += np.array([0., 0., -0.2])  # disturbed initial position
         x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
         # print("Perturbed Intitial State: ")
         # print(x0)
@@ -203,8 +203,8 @@ class OnlineParamEst:
 
         return x_all, u_all, theta_all, theta_hat_all
     
-    def simulate_quadrotor_hover_with_KF(self, NSIM: int =200): #TODO: add RLS parameters here!
-        np.random.seed(42)
+    def simulate_quadrotor_hover_with_KF(self, Q_noise, R_noise, NSIM: int =200): #TODO: add RLS parameters here!
+        np.random.seed(3)
         self.quadrotor = Quadrotor()
         self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
         # initialize quadrotor parameters
@@ -212,10 +212,10 @@ class OnlineParamEst:
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
         Ixy, Ixz, Iyz = self.quadrotor.J[0,1], self.quadrotor.J[0,2], self.quadrotor.J[1,2]
         # theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
-        print(Ixx)
+      #  print(Ixx)
         theta = np.array([Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
         theta_hat = theta.copy()
-        print("KF theta: ", theta)
+       # print("KF theta: ", theta)
         
         # get tasks goals
         x_nom, u_nom = self.quadrotor.get_hover_goals()
@@ -225,10 +225,10 @@ class OnlineParamEst:
 
         # randomly perturb initial state
         x0 = np.copy(x_nom)
-        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[0:3] += np.array([0., 0., -0.2])  # disturbed initial position
         x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
-        print("Perturbed Intitial State: ")
-        print(x0)
+       # print("Perturbed Intitial State: ")
+        #print(x0)
 
         # get initial control and state
         u_curr = self.quadrotor_controller.compute(x0, x_nom, u_nom)
@@ -248,7 +248,7 @@ class OnlineParamEst:
         R_ekf = 1e-3 * np.eye(3*n)
 
 
-        kf = EKF(num_params=6, process_noise=Q_ekf, measurement_noise=R_ekf)
+        kf = EKF(num_params=6, process_noise=Q_noise, measurement_noise=R_noise)
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
@@ -480,7 +480,7 @@ class OnlineParamEst:
     #     return x_all, u_all, theta_all, theta_hat_all
 
     def simulate_quadrotor_hover_with_DEKA(self, NSIM: int =200): #TODO: add RLS parameters here!
-        np.random.seed(42)
+        np.random.seed(3)
         self.quadrotor = Quadrotor()
         self.quadrotor_controller = LQRController(self.quadrotor.delta_x_quat)
 
@@ -489,10 +489,10 @@ class OnlineParamEst:
         Ixx, Iyy, Izz = self.quadrotor.J[0,0], self.quadrotor.J[1,1], self.quadrotor.J[2,2]
         Ixy, Ixz, Iyz = self.quadrotor.J[0,1], self.quadrotor.J[0,2], self.quadrotor.J[1,2]
         # theta = np.array([self.quadrotor.mass,Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
-        print(Ixx)
+      #  print(Ixx)
         theta = np.array([Ixx,Ixy,Ixz,Iyy,Iyz,Izz])
         theta_hat = theta.copy()
-        print("DEKA theta: ", theta)
+       # print("DEKA theta: ", theta)
         # get tasks goals
         x_nom, u_nom = self.quadrotor.get_hover_goals(theta)
         Anp, Bnp = self.quadrotor.get_linearized_dynamics(x_nom, u_nom, theta)
@@ -501,10 +501,10 @@ class OnlineParamEst:
 
         # randomly perturb initial state
         x0 = np.copy(x_nom)
-        x0[0:3] += np.array([0.2, 0.2, -0.2])  # disturbed initial position
+        x0[0:3] += np.array([0., 0., -0.2])  # disturbed initial position
         x0[3:7] = self.quadrotor.rptoq(np.array([1.0, 0.0, 0.0]))  # disturbed initial attitude #TODO: move math methods to utilities class
-        print("Perturbed Intitial State: ")
-        print(x0)
+       # print("Perturbed Intitial State: ")
+      #  print(x0)
 
         # get initial control and state
         u_curr = self.quadrotor_controller.compute(x0, x_nom, u_nom)
@@ -564,13 +564,13 @@ class OnlineParamEst:
             b_tot[:3] = b
 
             if i % 5 == 0 and i > 0:
-                print("step ", i)
+              #  print("step ", i)
                 theta_hat_prev = theta_hat
                 theta_hat = deka.iterate(A_tot,b_tot, num_iterations=int(9/6*(n**2)))[0].reshape(-1,)
                 
                 if (np.linalg.norm(theta_hat - theta_hat_prev) / np.linalg.norm(theta_hat)) > 0.2:
                     theta_hat = 0.4 * theta_hat + 0.6 * theta_hat_prev
-                    print(f"smoothed at step {i} with value {(np.linalg.norm(theta_hat - theta_hat_prev) / np.linalg.norm(theta_hat))}: ")
+                   # print(f"smoothed at step {i} with value {(np.linalg.norm(theta_hat - theta_hat_prev) / np.linalg.norm(theta_hat))}: ")
 
             # print(A@(theta.reshape(-1,1)))
             # print(b)

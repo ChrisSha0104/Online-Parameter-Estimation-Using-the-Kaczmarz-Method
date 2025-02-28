@@ -143,10 +143,11 @@ class DEKA_new:
         )
 
         return self.x_k_smooth, k
+
 class RLS:
     """RLS with adaptive forgetting factor (lambda)."""
 
-    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.5, c=1000):
+    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.8, c=1000):
         """
         :param num_params: Number of parameters to estimate.
         :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
@@ -475,7 +476,7 @@ class DEKA:
         self,
         num_params,
         x0=None,
-        damping=0.1,
+        damping=0.9,
         regularization=1e-6,
         smoothing_factor=0.9,
         tol_max=1e-4,
@@ -539,7 +540,7 @@ class DEKA:
             residual = (b - A @ self.x_k).squeeze()
             # import pdb; pdb.set_trace()
             if np.linalg.norm(residual) < self.tol:
-                print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
+               # print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
                 # import pdb; pdb.set_trace()
                 if self.tol > self.tol_min:
                     self.tol *= 0.5
@@ -575,7 +576,7 @@ class DEKA:
         if exit_status:
             if self.tol < self.tol_min:
                 self.tol *= 2
-            print("max iter reached")
+           # print("max iter reached")
 
         # Exponential smoothing to blend the new raw estimate into a smoothed version
         self.x_k_smooth = (
