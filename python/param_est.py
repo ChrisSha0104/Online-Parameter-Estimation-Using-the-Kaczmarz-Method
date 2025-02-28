@@ -563,16 +563,16 @@ class OnlineParamEst:
             b_tot[:6] = b
 
             if i % 5 == 0 and i > 0:
-                print("step", i)
+                # print("step", i)
                 theta_hat_prev = theta_hat
                 theta_hat = deka.iterate(A_tot,b_tot, x_0=theta_hat_prev.reshape(-1,1),num_iterations=int(9/6*(n**2)))[0].reshape(-1,)
                 
                 if (np.linalg.norm(theta_hat - theta_hat_prev) / np.linalg.norm(theta_hat)) > 0.2:
                     theta_hat = 0.8 * theta_hat + 0.2 * theta_hat_prev
-                    print(f"smoothed at step {i} with value {(np.linalg.norm(theta_hat - theta_hat_prev) / np.linalg.norm(theta_hat))}: ")
-                print("theta: ", theta, "\n"
-                    "theta_hat", theta_hat, "\n",
-                    )
+                    # print(f"smoothed at step {i} with value {(np.linalg.norm(theta_hat - theta_hat_prev) / np.linalg.norm(theta_hat))}: ")
+                # print("theta: ", theta, "\n"
+                #     "theta_hat", theta_hat, "\n",
+                #     )
             # print(A@(theta.reshape(-1,1)))
             # print(b)
 
