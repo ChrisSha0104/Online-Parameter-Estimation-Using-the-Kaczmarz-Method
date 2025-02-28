@@ -10,7 +10,7 @@ class LQRController():
         self.delta_x_quat = delta_x_quat
 
     def get_QR_bryson(self):
-        max_dev_x = np.array([0.1, 0.1, 0.0015,  0.5, 0.5, 0.05,  0.5, 0.5, 0.5,  0.7, 0.7, 0.2])
+        max_dev_x = np.array([0.1, 0.1, 0.01,  0.5, 0.5, 0.05,  0.5, 0.5, 0.5,  0.7, 0.7, 0.2])
         max_dev_u = np.array([0.5, 0.5, 0.5, 0.5])/6
         Q = np.diag(1./max_dev_x**2)
         R = np.diag(1./max_dev_u**2)
@@ -18,10 +18,10 @@ class LQRController():
         return Q, R
 
     def update_linearized_dynamics (self, Anp, Bnp, Q, R):
-        self.Anp = Anp
-        self.Bnp = Bnp
-        self.Q = Q
-        self.R = R
+        self.Anp = Anp.copy()
+        self.Bnp = Bnp.copy()
+        self.Q = Q.copy()
+        self.R = R.copy()
 
     # Riccati recursion on the linearized dynamics
     def dlqr(self, A, B, Q, R, n_steps = 500):

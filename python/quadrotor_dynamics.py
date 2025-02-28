@@ -89,11 +89,11 @@ class Quadrotor():
     
     # Quadrotor dynamics -- single rigid body dynamics
     def quad_dynamics(self, x, u, theta):
-        mass = theta[0]
+        mass = theta[0].copy()
         Ixx,Ixy,Ixz,Iyy,Iyz,Izz = theta[1:7]
         J = np.array([[Ixx, Ixy, Ixz],
-                           [Ixy, Iyy, Iyz],
-                           [Ixz, Iyz, Izz]], dtype=np.float64)
+                      [Ixy, Iyy, Iyz],
+                      [Ixz, Iyz, Izz]], dtype=np.float64)
 
         r = x[0:3]  # position
         q = x[3:7]/norm(x[3:7])  # normalize quaternion
@@ -182,9 +182,8 @@ class Quadrotor():
         
         return np.vstack([F_w, tau_b])
     
-    def get_hover_goals(self, theta=None):
-        # mass = theta[0]
-        mass = self.mass
+    def get_hover_goals(self, theta):
+        mass = theta[0].copy()
 
         # Hovering state and control input
         self.rg = np.array([0.0, 0, 0.0])

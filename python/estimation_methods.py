@@ -147,7 +147,7 @@ class DEKA_new:
 class RLS:
     """RLS with adaptive forgetting factor (lambda)."""
 
-    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.6, c=1000):
+    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.9, c=1000):
         """
         :param num_params: Number of parameters to estimate.
         :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
