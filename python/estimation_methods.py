@@ -147,7 +147,7 @@ class DEKA_new:
 class RLS:
     """RLS with adaptive forgetting factor (lambda)."""
 
-    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.8, c=1000):
+    def __init__(self, num_params, theta_hat=None, forgetting_factor=0.6, c=1000):
         """
         :param num_params: Number of parameters to estimate.
         :param theta_hat: Initial estimate of parameters, otherwise set to zeros.
@@ -540,10 +540,10 @@ class DEKA:
             residual = (b - A @ self.x_k).squeeze()
             # import pdb; pdb.set_trace()
             if np.linalg.norm(residual) < self.tol:
-               # print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
+                print(f"exited at {np.linalg.norm(residual)} in {k} iterations")
                 # import pdb; pdb.set_trace()
-                if self.tol > self.tol_min:
-                    self.tol *= 0.5
+                # if self.tol > self.tol_min:
+                    # self.tol *= 0.5
                 break
 
             # Compute quantities needed for the update.
@@ -557,7 +557,7 @@ class DEKA:
             eta_k = np.where(residual ** 2 / A_row_norms_sq >= epsilon_k * res_norm_sq, residual, 0).reshape(-1, 1)
 
             if eta_k.sum() == 0:
-                # print("Empty tau_k at iteration", k)
+                print("Empty tau_k at iteration", k)
                 break
 
             # Compute the update direction.
@@ -574,9 +574,9 @@ class DEKA:
 
         exit_status = (k == (num_iterations-1))
         if exit_status:
-            if self.tol < self.tol_min:
-                self.tol *= 2
-           # print("max iter reached")
+            # if self.tol < self.tol_min:
+                # self.tol *= 2
+            print("max iter reached")
 
         # Exponential smoothing to blend the new raw estimate into a smoothed version
         self.x_k_smooth = (

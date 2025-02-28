@@ -89,8 +89,8 @@ class Quadrotor():
     
     # Quadrotor dynamics -- single rigid body dynamics
     def quad_dynamics(self, x, u, theta):
-        mass = self.mass
-        Ixx,Ixy,Ixz,Iyy,Iyz,Izz = theta[:6]
+        mass = theta[0]
+        Ixx,Ixy,Ixz,Iyy,Iyz,Izz = theta[1:7]
         J = np.array([[Ixx, Ixy, Ixz],
                            [Ixy, Iyy, Iyz],
                            [Ixz, Iyz, Izz]], dtype=np.float64)
@@ -158,29 +158,29 @@ class Quadrotor():
         w_x, w_y, w_z = x_curr[10:13]
 
         A = np.array([
-            # [a_x, 0, 0, 0, 0, 0, 0],  # fx equation (acceleration)
-            # [a_y, 0, 0, 0, 0, 0, 0],  # fy equation
-            # [a_z, 0, 0, 0, 0, 0, 0],  # fz equation
-            [a_p, a_q-w_x*w_z, a_r+w_x*w_y, -w_y*w_z, w_y**2+w_z**2, w_y*w_z],  # τx equation (angular acceleration)
-            [w_x*w_z, a_p+w_y*w_z, w_z**2-w_x**2, a_q, a_r-w_x*w_y, -w_x*w_z],  # τy equation
-            [-w_x*w_y, w_x**2-w_y**2, a_p-w_y*w_z, w_x*w_y, a_q+w_x*w_z, a_r]  # τz equation
+            [a_x, 0, 0, 0, 0, 0, 0],  # fx equation (acceleration)
+            [a_y, 0, 0, 0, 0, 0, 0],  # fy equation
+            [a_z, 0, 0, 0, 0, 0, 0],  # fz equation
+            [0, a_p, a_q-w_x*w_z, a_r+w_x*w_y, -w_y*w_z, w_y**2+w_z**2, w_y*w_z],  # τx equation (angular acceleration)
+            [0, w_x*w_z, a_p+w_y*w_z, w_z**2-w_x**2, a_q, a_r-w_x*w_y, -w_x*w_z],  # τy equation
+            [0, -w_x*w_y, w_x**2-w_y**2, a_p-w_y*w_z, w_x*w_y, a_q+w_x*w_z, a_r]  # τz equation
         ], dtype=np.float64)
         return A
     
     def get_force_vector(self, x_curr, u_curr, theta):
-        # R = self.qtoQ(x_curr[3:7])
+        R = self.qtoQ(x_curr[3:7])
 
-        # F_b = np.array([[0], 
-        #               [0],  
-        #               [np.sum(u_curr) * self.kt]]) # TODO: fix this dim
-        # F_w = R @ F_b
-        # F_w[2] -= theta[0] * self.g
+        F_b = np.array([[0], 
+                      [0],  
+                      [np.sum(u_curr) * self.kt]]) # TODO: fix this dim
+        F_w = R @ F_b
+        F_w[2] -= theta[0] * self.g
 
         tau_b = np.array([[self.el*self.kt*(-u_curr[0]-u_curr[1]+u_curr[2]+u_curr[3])], # - - + +
                         [self.el*self.kt*(-u_curr[0]+u_curr[1]+u_curr[2]-u_curr[3])],  # - + + -
                         [self.km*(-u_curr[0] + u_curr[1] - u_curr[2] + u_curr[3])]]) # - + - +
         
-        return tau_b#np.vstack([F_w, tau_b])
+        return np.vstack([F_w, tau_b])
     
     def get_hover_goals(self, theta=None):
         # mass = theta[0]
