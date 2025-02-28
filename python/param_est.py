@@ -124,7 +124,7 @@ class OnlineParamEst:
 
         # randomly perturb initial state
         x0 = np.copy(x_nom)
-        x0[0:3] += np.array([0.14, -0.11, -0.22])  # disturbed initial position
+        x0[0:3] += np.array([0.1, -0.15, -0.1])  # disturbed initial position
         x0[3:7] = self.quadrotor.rptoq(np.array([0.3, 0.4, 0.2]))  # disturbed initial attitude #TODO: move math methods to utilities class
         # print("Perturbed Intitial State: ")
         # print(x0)
@@ -223,7 +223,7 @@ class OnlineParamEst:
 
         # randomly perturb initial state
         x0 = np.copy(x_nom)
-        x0[0:3] += np.array([0.14, -0.11, -0.22])  # disturbed initial position
+        x0[0:3] += np.array([0.1, -0.15, -0.1])  # disturbed initial position
         x0[3:7] = self.quadrotor.rptoq(np.array([0.3, 0.4, 0.2]))  # disturbed initial attitude #TODO: move math methods to utilities class
        # print("Perturbed Intitial State: ")
         #print(x0)
@@ -500,7 +500,7 @@ class OnlineParamEst:
 
         # randomly perturb initial state
         x0 = np.copy(x_nom)
-        x0[0:3] += np.array([0.14, -0.11, -0.22])  # disturbed initial position
+        x0[0:3] += np.array([0.1, -0.15, -0.1])  # disturbed initial position
         x0[3:7] = self.quadrotor.rptoq(np.array([0.3, 0.4, 0.2]))  # disturbed initial attitude #TODO: move math methods to utilities class
        # print("Perturbed Intitial State: ")
       #  print(x0)
@@ -516,7 +516,7 @@ class OnlineParamEst:
 
         changing_steps = [100]#np.random.choice(range(20,180),size=2, replace=False)
  
-        deka = DEKA(num_params=7, x0=theta.reshape(-1,1), damping=1.0, regularization=1e-15, smoothing_factor=0.0, tol_max=1e-4, tol_min=0.01)
+        deka = DEKA(num_params=7, x0=theta.reshape(-1,1), damping=0.7, regularization=1e-15, smoothing_factor=0.2, tol_max=1e-5, tol_min=0.01)
 
         n = 10
 
