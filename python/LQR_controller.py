@@ -12,6 +12,8 @@ class LQRController():
     def get_QR_bryson(self):
         max_dev_x = np.array([0.1, 0.1, 0.01,  0.5, 0.5, 0.05,  0.5, 0.5, 0.5,  0.7, 0.7, 0.2])
         max_dev_u = np.array([0.5, 0.5, 0.5, 0.5])/6
+        # max_dev_x = np.array([0.05, 0.05, 0.005,  0.5, 0.5, 0.05,  0.5, 0.5, 0.5,  0.7, 0.7, 0.2]) # increase = increase tolerance for state deviation
+        # max_dev_u = np.array([0.8, 0.8, 0.8, 0.8])/6 # increase = trust the control less
         Q = np.diag(1./max_dev_x**2)
         R = np.diag(1./max_dev_u**2)
 

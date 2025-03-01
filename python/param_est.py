@@ -247,7 +247,7 @@ class OnlineParamEst:
         R_ekf = 1e-5 * np.eye(6*n)
 
 
-        kf = EKF(num_params=7, process_noise=Q_noise, measurement_noise=R_noise, theta_hat=theta.copy().reshape(-1,1))
+        kf = EKF(num_params=7, process_noise=Q_noise, measurement_noise=R_noise)#, theta_hat=theta.copy().reshape(-1,1))
 
         # simulate the dynamics with the LQR controller
         for i in range(NSIM):
