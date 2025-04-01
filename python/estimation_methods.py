@@ -575,7 +575,7 @@ class DEKA:
         if exit_status:
             if self.tol < self.tol_min:
                 self.tol *= 2
-            print("max iter reached")
+            # print("max iter reached")
 
         # Exponential smoothing to blend the new raw estimate into a smoothed version
         self.x_k_smooth = (
