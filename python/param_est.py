@@ -140,7 +140,7 @@ class OnlineParamEst:
 
         changing_steps = [100]#np.random.choice(range(20,180),size=2, replace=False)
  
-        rls = RLS(num_params=7, forgetting_factor=0.7, theta_hat=theta.copy().reshape(-1,1))
+        rls = RLS(num_params=7, forgetting_factor=0.85, theta_hat=theta.copy().reshape(-1,1))
         n = 10
         A_tot = np.zeros((6*n,7))
         b_tot = np.zeros((6*n,1))
