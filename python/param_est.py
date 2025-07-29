@@ -10,12 +10,12 @@ from collections import deque
 np.set_printoptions(precision=4, suppress=True)
 # Note: autograd does not work with np.block
 
-from quadrotor_dynamics import Quadrotor
-from double_pendulum_dynamics import DoublePendulum
-from double_pen_LQR import LQRController_pen
-from LQR_controller import LQRController
-from estimation_methods import *
-from utilities import *
+from python.quadrotor.quadrotor_dynamics_old import Quadrotor
+from python.double_pendulum.double_pendulum_dynamics import DoublePendulum
+from python.double_pendulum.double_pen_LQR import LQRController_pen
+from python.common.LQR_controller import LQRController
+from python.common.estimation_methods_old import *
+from python.common.utilities import *
 
 import argparse
 
@@ -172,7 +172,7 @@ class OnlineParamEst:
             x_curr = self.quadrotor.quad_dynamics_rk4(x_curr, u_curr, theta)       # at t=k+1
             # formulate measurement model
             A = self.quadrotor.get_data_matrix(x_curr, self.quadrotor.quad_dynamics(x_curr, u_curr, theta))
-            b = self.quadrotor.get_force_vector(x_curr, u_curr, theta)
+            b = self.get_force_vector(x_curr, u_curr, theta)
             measurement_noise_std = 0.05 * np.abs(b)
             b += np.random.normal(0, measurement_noise_std, size = b.shape)
 

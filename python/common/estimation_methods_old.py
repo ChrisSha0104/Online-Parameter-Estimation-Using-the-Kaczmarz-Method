@@ -218,9 +218,9 @@ class AdaptiveLambdaRLS:
         return self.theta_hat
 
 
-class EKF:
+class KF:
     """
-    Basic Extended Kalman Filter
+    Basic Kalman Filter
 
     Assumes that the process noise and measurement noise are known, and that their Jacobians are I. Additionally, the process model jacobian is assumed to be I.
 
