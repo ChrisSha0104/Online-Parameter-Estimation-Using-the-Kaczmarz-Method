@@ -1,10 +1,9 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-def apply_noise(x, pos_std=3e-4, rot_std_deg=1.0, vel_std=1e-4, angvel_std_deg=0.5):
+def apply_noise(x, pos_std=3e-5, rot_std_deg=0.01, vel_std=1e-6, angvel_std_deg=1e-6):
     """
     Apply physically meaningful noise to a 13D state vector.
-    
     Args:
         x (np.ndarray): State vector of shape (13,)
         pos_std (float): Position noise std dev in meters (default: 1 mm)

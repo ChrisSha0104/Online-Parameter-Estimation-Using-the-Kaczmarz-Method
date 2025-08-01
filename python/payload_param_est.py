@@ -13,62 +13,87 @@ from python.common.noise_models import *   # for apply_noise
 from python.common.estimation_methods import RLS, KF, RK
 
 np.random.seed(42)
+np.set_printoptions(precision=7, suppress=True)
 
-def regularize_inertial_params(theta, eps=1e-10):
+def set_axes_equal(ax):
     """
-    Project an estimated inertial parameter vector onto the
-    physically-consistent set.
+    Set 3D plot axes to equal scale so that spheres appear as spheres.
+    Works with Matplotlib 3D axes.
+    """
+    limits = np.array([
+        ax.get_xlim3d(),
+        ax.get_ylim3d(),
+        ax.get_zlim3d()
+    ])
+    centers = np.mean(limits, axis=1)
+    span = max(limits[:,1] - limits[:,0]) / 2
+    for center, setter in zip(centers, [ax.set_xlim3d, ax.set_ylim3d, ax.set_zlim3d]):
+        setter(center - span, center + span)
+
+def mean_relative_error(x_hat, x_true, eps=1e-18):
+    rel_err = np.abs(x_hat - x_true) / (np.abs(x_true) + eps)
+    # print(f"Relative error: {rel_err}")
+    return np.mean(rel_err)
+
+def weighted_lstsq(A: np.ndarray,
+                   b: np.ndarray,
+                   w: np.ndarray,
+                   rcond=None) -> np.ndarray:
+    """
+    Solve min_x || W^(1/2) (A x - b) ||₂ via ordinary least squares.
 
     Args:
-      theta (array-like, shape=(10,)):
-        [m, m*cx, m*cy, m*cz, Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
-      eps (float): small positive floor for eigenvalues and mass.
+        A      – design matrix, shape (N, p)
+        b      – measurements vector, shape (N,)
+        w      – non‐negative weights, shape (N,)
+        rcond  – passed through to np.linalg.lstsq
 
     Returns:
-      theta_reg (np.ndarray, shape=(10,)):
-        the regularized parameter vector.
+        x_hat  – solution vector, shape (p,)
     """
-    # 1) Unpack
-    m      = float(theta[0])
-    first  = np.array(theta[1:4], dtype=float)  # m * [cx, cy, cz]
-    I_vec  = theta[4:]                          # [Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
+    # form W^(1/2)
+    sqrt_w = np.sqrt(w)
+    # sqrt_w[0] *= 5
+    # weight each row
+    A_w = A * sqrt_w[:, None]
+    b_w = b * sqrt_w
+    # solve and return
+    x_hat, *_ = np.linalg.lstsq(A_w, b_w, rcond=rcond)
+    return x_hat
 
-    # 2) Ensure mass > eps
-    m_reg = max(m, eps)
+def is_valid_inertia(J):
+    # 1. symmetric?
+    if not np.allclose(J, J.T, atol=1e-8):
+        return False, "not symmetric"
+    # 2. positive eigenvalues?
+    eigs = np.linalg.eigvalsh(J)
+    if np.any(eigs <= 0):
+        return False, "not positive-definite"
+    return True, "OK"
 
-    # 3) Compute COM position r = first / m
-    r = first / m_reg
+def closest_spd(theta, epsilon=1e-6):
+    m, cx, cy, cz, Ixx, Iyy, Izz, Ixy, Ixz, Iyz = theta
+    A = np.array([[Ixx, Ixy, Ixz],
+                [Ixy, Iyy, Iyz],
+                [Ixz, Iyz, Izz]])
+    # Step 1: Symmetrize
+    A_sym = 0.5 * (A + A.T)
 
-    # 4) Build the inertia matrix and symmetrize
-    I_est = np.array([
-        [I_vec[0], I_vec[3], I_vec[4]],
-        [I_vec[3], I_vec[1], I_vec[5]],
-        [I_vec[4], I_vec[5], I_vec[2]],
-    ], dtype=float)
-    B = 0.5*(I_est + I_est.T)
+    # Step 2: Eigen-decomposition
+    eigvals, eigvecs = np.linalg.eigh(A_sym)
 
-    # 5) Nearest SPD via eigen‑clamp (Higham’s method)
-    eigvals, Q = np.linalg.eigh(B)
-    eigvals_clamped = np.clip(eigvals, eps, None)
-    I_spd = (Q * eigvals_clamped) @ Q.T
+    # Step 3: Clamp eigenvalues to be > epsilon
+    eigvals_clamped = np.clip(eigvals, epsilon, None)
 
-    # 6) Enforce COM‑ellipsoid constraint:
-    #    require m_reg * ||r||^2 <= λ_min(I_spd)
-    lam_min = eigvals_clamped.min()
-    r_norm2 = r.dot(r)
-    if r_norm2 > 0:
-        max_r2 = lam_min / m_reg
-        if r_norm2 > max_r2:
-            scale = np.sqrt(max_r2 / r_norm2)
-            r = r * scale
+    # Step 4: Reconstruct SPD matrix
+    A_spd = eigvecs @ np.diag(eigvals_clamped) @ eigvecs.T
 
-    # 7) Repack
-    first_reg = m_reg * r
-    Ixx, Iyy, Izz = I_spd[0,0], I_spd[1,1], I_spd[2,2]
-    Ixy, Ixz, Iyz = I_spd[0,1], I_spd[0,2], I_spd[1,2]
+    Ixx_spd, Iyy_spd, Izz_spd = A_spd[0, 0], A_spd[1, 1], A_spd[2, 2]
+    Ixy_spd, Ixz_spd, Iyz_spd = A_spd[0, 1], A_spd[0, 2], A_spd[1, 2]
 
-    theta_reg = np.hstack([m_reg, first_reg, [Ixx, Iyy, Izz, Ixy, Ixz, Iyz]])
-    return theta_reg
+    theta_spd = np.array([m, cx, cy, cz, Ixx_spd, Iyy_spd, Izz_spd, Ixy_spd, Ixz_spd, Iyz_spd])
+
+    return theta_spd
 
 def compute_tracking_error(x_all, x_ref_all):
     """Compute L2 position error over the trajectory"""
@@ -97,12 +122,13 @@ def get_error_state(quad, x, xg):
     return np.hstack([pos_err, phi, vel_err, om_err])
 
 def main():
-    estimator_options = "rls" # gt, none, rk, rls, kf
-    assert estimator_options in ["gt", "none", "rk", "rls", "kf"], \
+    estimator_options = "lstsq" # gt, none, rk, rls, kf
+    assert estimator_options in ["gt", "none", "lstsq", "rk", "rls", "kf"], \
         "Invalid estimator option. Choose from 'gt', 'none', 'rk', 'rls', 'kf'."
 
     quad = QuadrotorDynamics()
     ug   = quad.hover_thrust_true
+    u = ug.copy()
 
     # LQR around hover
     xg0 = np.hstack([np.zeros(3), np.array([1,0,0,0]), np.zeros(6)])
@@ -121,7 +147,7 @@ def main():
 
     # Initial true state
     x_true = np.zeros(13)
-    x_true[0:3] = pos_ref[0] + 0.05*np.random.randn(3)
+    x_true[0:3] = pos_ref[0] + 0.1*np.random.randn(3)
     phi0 = 0.02*np.random.randn(3)
     x_true[3:7] = quad.rptoq(phi0)
     x_true[7:10] = vel_ref[0] + 0.01*np.random.randn(3)
@@ -141,19 +167,17 @@ def main():
     # Estimator
     theta = quad.get_true_inertial_params()
     theta_est = None
-    _have_estimator = False
+    _have_estimator = (estimator_options != "none")
+
     if estimator_options == "rls":
         estimator = RLS(num_params=theta.shape[0], theta_hat=theta, forgetting_factor=0.95, c=1000)
-        _have_estimator = True
     elif estimator_options == "kf":
         estimator = KF(num_params=theta.shape[0], process_noise=1e-4*np.eye(theta.shape[0]),
                        measurement_noise=1e-4*np.eye(3), theta_hat=theta, c=1000)
-        _have_estimator = True
     elif estimator_options == "rk":
         estimator = RK(num_params=theta.shape[0], x0=theta, c=1000)
-        _have_estimator = True
 
-    event_step = 500
+    event_step = 250
 
     # Simulation loop
     for k in range(len(t)):
@@ -169,7 +193,9 @@ def main():
 
         # control on measured
         x_err12 = get_error_state(quad, x_meas, xg)
+        last_u = u.copy()
         u = ug + lqr.control(x_err12)
+        u = 0.5 * u + 0.5 * last_u  # low-pass filter
 
         # true propagation
         x_true_next = quad.dynamics_rk4_true(x_true, u, dt=dt)
@@ -181,51 +207,57 @@ def main():
         # force residual on measured
         dx_meas = (x_meas_next - x_meas)/dt
         A_mat = quad.get_data_matrix(x_meas, dx_meas)
-        A_norm = np.linalg.norm(A_mat, ord='fro')
-        A_mat = A_mat / A_norm
-        b_vec = quad.get_force_vector(x_meas, u) + np.random.normal(0, 3e-4, size=(A_mat.shape[0],))
-        b_vec = b_vec / A_norm
+        b_vec = quad.get_force_vector(x_meas, dx_meas, u) #+ np.random.normal(0, 1e-9, size=(A_mat.shape[0],))        
 
         theta_gt   = quad.get_true_inertial_params()
-        err_gt     = np.linalg.norm(A_mat @ theta_gt - b_vec)
+        err_gt     = mean_relative_error(A_mat @ theta_gt, b_vec)
+        print("theta_gt:", theta_gt)
+        print("A_mat @ theta_gt:", A_mat @ theta_gt)
+        print("b_vec:", b_vec)
         gt_err_traj.append(err_gt)
 
-        if _have_estimator:
-            theta_est = estimator.iterate(A_mat, b_vec)
-            theta_est = np.linalg.lstsq(A_mat, b_vec, rcond=None)[0]  # alternative method
-            theta_est = regularize_inertial_params(theta_est)
-            err_est   = np.linalg.norm(A_mat @ theta_est - b_vec)
-            est_err_traj.append(err_est)
-
-        meas_noise.append(noise_vec.copy())
-
-        print(f"Step {k+1}/{len(t)}: "
-                f"True pos: {x_true_next[0:3]}, "
-                f"Measured pos: {x_meas_next[0:3]}, "
-                f"GT error: {err_gt:.4f}, "
-                f"Est error: {err_est:.4f}" if _have_estimator else "")
-
-        # perturb theta
-        if k == event_step:
-            # import pdb; pdb.set_trace()  # Debugging breakpoint
-            quad.attach_payload(m_p=0.0005, delta_r_p=np.array([0.02, 0.01, 0.0]))
-            if estimator_options == "none":
-                # use estimated parameters
-                theta_est = quad.get_estimated_inertial_params()            # choose gt or estimated theta
-                ug = quad.get_hover_thrust_est()
-                A_new, B_new = quad.get_linearized_est(xg, ug)
-            elif estimator_options == "gt":
+        if _have_estimator & (k % 20 == 0):
+            if estimator_options == "gt":
                 # use true parameters
-                theta_gt = quad.get_true_inertial_params()
+                theta_est = quad.get_true_inertial_params()
                 ug = quad.get_hover_thrust_true()
                 A_new, B_new = quad.get_linearized_true(xg, ug)
-            else:
-                # theta_gt = quad.get_true_inertial_params()
+                lqr.update_linearized_dynamics(A_new, B_new)
+
+            else: 
+                if estimator_options == "lstsq":
+                    theta_est = np.linalg.lstsq(A_mat, b_vec, rcond=None)[0]
+                elif estimator_options == "rls" or estimator_options == "kf" or estimator_options == "rk":
+                    theta_est = estimator.iterate(A_mat, b_vec)
+
+                theta_est[4] = theta_est[5] = np.mean(theta_est[4:6])
+                theta_est = closest_spd(theta_est)  # ensure SPD
+
                 quad.set_estimated_inertial_params(theta_est)
                 ug = quad.get_hover_thrust_est()
                 A_new, B_new = quad.get_linearized_est(xg, ug)
+                lqr.update_linearized_dynamics(A_new, B_new)
 
-            lqr.update_linearized_dynamics(A_new, B_new)
+        if _have_estimator:
+            err_est   = mean_relative_error(A_mat @ theta_est, b_vec)
+            est_err_traj.append(err_est)
+            print("theta_est:", theta_est)
+            print("A_mat @ theta_est:", A_mat @ theta_est)
+            print("b_vec:", b_vec)
+
+
+        # import pdb; pdb.set_trace()  # Debugging breakpoint
+        meas_noise.append(noise_vec.copy())
+
+        print(f"Step {k+1}/{len(t)}: ")
+                # f"True pos: {x_true_next[0:3]}, "
+                # f"Measured pos: {x_meas_next[0:3]}, "
+                # f"GT error: {err_gt:.4f}, "
+                # f"Est error: {err_est:.4f}" if _have_estimator else "")
+
+        # perturb theta
+        if k == event_step:
+            quad.attach_payload(m_p=0.015, delta_r_p=np.array([0.001, -0.0011, -0.001]))
             print(f"Payload attached at t={t[k]:.2f}s, new theta:\n{theta}")
 
         # step
@@ -268,11 +300,41 @@ def main():
     fig, axs = plt.subplots(3,1, figsize=(9,7), sharex=True)
     axs[0].plot(t, pos_err_comp); axs[0].set_ylabel('Pos error [m]'); axs[0].legend(('x','y','z')); axs[0].grid(True); axs[0].axvline(event_step * quad.dt, color='red', linestyle='--')
     axs[1].plot(t, vel_err_comp); axs[1].set_ylabel('Vel error [m/s]'); axs[1].legend(('v_x','v_y','v_z')); axs[1].grid(True); axs[1].axvline(event_step * quad.dt, color='red', linestyle='--')
-    axs[2].plot(t, uniform_filter1d(orient_err_comp, size=3, axis=1)); axs[2].set_ylabel('Ori error [deg]'); axs[2].legend(('roll','pitch','yaw')); axs[2].set_xlabel('Time [s]'); axs[2].grid(True); axs[2].axvline(event_step * quad.dt, color='red', linestyle='--')
+    axs[2].plot(t, orient_err_comp); axs[2].set_ylabel('Ori error [deg]'); axs[2].legend(('roll','pitch','yaw')); axs[2].set_xlabel('Time [s]'); axs[2].grid(True); axs[2].axvline(event_step * quad.dt, color='red', linestyle='--')
     plt.tight_layout()
     plt.show()
 
-    # 2) 3d Vis
+    # 2) Mean errors
+    fig, axs = plt.subplots(3, 1, figsize=(9, 7), sharex=True)
+
+    # compute mean across x,y,z for each error type
+    pos_err_mean   = np.mean(pos_err_comp,   axis=1)
+    vel_err_mean   = np.mean(vel_err_comp,   axis=1)
+    orient_err_mean= np.mean(orient_err_comp,axis=1)
+
+    # Panel 1: mean position error
+    axs[0].plot(t, moving_average(abs(pos_err_mean)))
+    axs[0].set_ylabel('Abs mean pos error [m]')
+    axs[0].grid(True)
+    axs[0].axvline(event_step * quad.dt, color='red', linestyle='--')
+
+    # Panel 2: mean velocity error
+    axs[1].plot(t, moving_average(abs(vel_err_mean)))
+    axs[1].set_ylabel('Abs mean vel error [m/s]')
+    axs[1].grid(True)
+    axs[1].axvline(event_step * quad.dt, color='red', linestyle='--')
+
+    # Panel 3: mean orientation error
+    axs[2].plot(t, moving_average(abs(orient_err_mean)))
+    axs[2].set_ylabel('Abs mean ori error [deg]')
+    axs[2].set_xlabel('Time [s]')
+    axs[2].grid(True)
+    axs[2].axvline(event_step * quad.dt, color='red', linestyle='--')
+
+    plt.tight_layout()
+    plt.show()
+
+    # 3) 3d Vis
     fig = plt.figure(figsize=(14,6))
     ax1 = fig.add_subplot(1,2,1, projection='3d')
     ax1.plot(x_ref_traj[:,0], x_ref_traj[:,1], x_ref_traj[:,2], 'g--', label='Reference 8')
@@ -280,20 +342,10 @@ def main():
     ax1.set_title('3D Figure‑8 Tracking')
     ax1.set_xlabel('X'); ax1.set_ylabel('Y'); ax1.set_zlabel('Z')
     ax1.legend()
-
-    # error vs time
-    # ax2 = fig.add_subplot(1,3,2)
-    # ax2.plot(t, pos_me_noise, label='pos noise [m]')
-    # ax2.plot(t, rot_me_noise, label='rot noise [deg]')
-    # ax2.plot(t, vel_me_noise, label='vel noise [m/s]')
-    # ax2.plot(t, angv_me_noise, label='angvel noise [rad/s]')
-    # ax2.set_title('Measurement Noise Norms')
-    # ax2.set_xlabel('Time [s]'); ax2.set_ylabel('Noise magnitude')
-    # ax2.legend(); ax2.grid(True)
-
+    set_axes_equal(ax1)
     # A*theta - b error norm
     ax2 = fig.add_subplot(1,2,2)
-    ax2.set_title('Normalized Force Residuals (||Aθ - b|| / ||A||)')
+    ax2.set_title('Mean Relative Force Error')
     ax2.plot(t, moving_average(gt_err_traj), lw=1.5, color='crimson', label='GT residual')
     if _have_estimator:
         ax2.plot(t, moving_average(est_err_traj), lw=1.5, color='navy',   label='Est residual')

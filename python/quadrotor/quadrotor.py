@@ -127,6 +127,10 @@ class QuadrotorDynamics:
             [-self.el*self.kt,  self.el*self.kt,  self.el*self.kt, -self.el*self.kt],
             [-self.km,           self.km,          -self.km,          self.km]
         ]) @ u
+
+        # print("J:", J)
+        # print("omg:", omg)
+        # import pdb; pdb.set_trace()  # Debugging breakpoint
         domg = inv(J) @ (
             -self.hat(omg) @ J @ omg
             + tau
@@ -195,39 +199,129 @@ class QuadrotorDynamics:
         return self.E(x_ref[3:7]).T @ A @ self.E(x_ref[3:7]), \
                self.E(x_ref[3:7]).T @ B
 
-    def get_data_matrix(self, x_curr, dx):
-        a_x, a_y, a_z = dx[7:10]
-        a_p, a_q, a_r = dx[10:13]
-        w_x, w_y, w_z = x_curr[10:13]
+    # def get_data_matrix(self, x_curr, dx):
+    #     a_x, a_y, a_z = dx[7:10]
+    #     a_p, a_q, a_r = dx[10:13]
+    #     w_x, w_y, w_z = x_curr[10:13]
 
-        # First moment terms: r_off = [x_c, y_c, z_c] -> m*x_c, m*y_c, m*z_c as variables
-        A = np.array([
-            [a_x, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [a_y, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [a_z, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, a_p, a_q - w_x*w_z, a_r + w_x*w_y, -w_y*w_z, w_y**2 + w_z**2, w_y*w_z, 0, -a_z, a_y],
-            [0, w_x*w_z, a_p + w_y*w_z, w_z**2 - w_x**2, a_q, a_r - w_x*w_y, -w_x*w_z, a_z, 0, -a_x],
-            [0, -w_x*w_y, w_x**2 - w_y**2, a_p - w_y*w_z, w_x*w_y, a_q + w_x*w_z, a_r, -a_y, a_x, 0]
-        ], dtype=np.float64)
-        return A
+    #     # First moment terms: r_off = [x_c, y_c, z_c] -> m*x_c, m*y_c, m*z_c as variables
+    #     A = np.array([
+    #         [a_x, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    #         [a_y, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    #         [a_z, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    #         [0, a_p, a_q - w_x*w_z, a_r + w_x*w_y, -w_y*w_z, w_y**2 + w_z**2, w_y*w_z, 0, -a_z, a_y],
+    #         [0, w_x*w_z, a_p + w_y*w_z, w_z**2 - w_x**2, a_q, a_r - w_x*w_y, -w_x*w_z, a_z, 0, -a_x],
+    #         [0, -w_x*w_y, w_x**2 - w_y**2, a_p - w_y*w_z, w_x*w_y, a_q + w_x*w_z, a_r, -a_y, a_x, 0]
+    #     ], dtype=np.float64)
+    #     return A
     
-    def get_force_vector(self, x_curr, u_curr):
-        R = self.qtoQ(x_curr[3:7])
-        m = self._mass_true
-        c = self._mass_true * self._r_off_true
+    # def get_force_vector(self, x_curr, u_curr):
+    #     R = self.qtoQ(x_curr[3:7])
+    #     m = self._mass_true
+    #     c = self._mass_true * self._r_off_true
 
-        F_b = np.array([[0], [0], [np.sum(u_curr) * self.kt]])
-        F_w = R @ F_b
-        F_w[2] -= m * self.g
+    #     F_b = np.array([[0], [0], [np.sum(u_curr) * self.kt]])
+    #     F_w = R @ F_b
+    #     F_w[2] -= m * self.g
 
-        tau_b = np.array([
-            [self.el * self.kt * (-u_curr[0] - u_curr[1] + u_curr[2] + u_curr[3])],
-            [self.el * self.kt * (-u_curr[0] + u_curr[1] + u_curr[2] - u_curr[3])],
-            [self.km * (-u_curr[0] + u_curr[1] - u_curr[2] + u_curr[3])]
-        ])
+    #     tau_b = np.array([
+    #         [self.el * self.kt * (-u_curr[0] - u_curr[1] + u_curr[2] + u_curr[3])],
+    #         [self.el * self.kt * (-u_curr[0] + u_curr[1] + u_curr[2] - u_curr[3])],
+    #         [self.km * (-u_curr[0] + u_curr[1] - u_curr[2] + u_curr[3])]
+    #     ])
 
-        tau_b += np.cross(c.reshape(3), F_b.reshape(3)).reshape(3,1)
-        return np.vstack([F_w, tau_b]).flatten()
+    #     tau_b += np.cross(c.reshape(3), F_b.reshape(3)).reshape(3,1)
+    #     return np.vstack([F_w, tau_b]).flatten()
+    def get_force_vector(self, x_curr: np.ndarray,
+                            dx:     np.ndarray,
+                            u_curr: np.ndarray) -> np.ndarray:
+        """
+        Build the 6×1 force/torque vector b = [F; τ] such that A·θ = b
+        with θ = [m, m x_c, m y_c, m z_c, Ixx, Iyy, Izz, Ixy, Ixz, Iyz].
+
+        Args:
+        x_curr: state (12,) = [r, q, v, ω]
+        dx:     state derivative (12,) = [v, q̇, a, α]
+        u_curr: motor inputs (4,)
+
+        Returns:
+        b: (6,) = [F_world; τ_body]
+        """
+        # normalize quaternion & build rotation
+        q = x_curr[3:7]
+        q = q / np.linalg.norm(q)
+        R = self.qtoQ(q)            # body → world
+
+        # physical constants
+        m   = self._mass_true
+        r_c = self._r_off_true      # COM offset in body frame
+        c   = m * r_c               # first moment vector
+
+        # 1) THRUST in body & world
+        F_b = np.array([0.0, 0.0, np.sum(u_curr) * self.kt])  # total thrust in body-z
+        F_w = R @ F_b                                        # rotate to world
+        F_w[2] -= m * self.g                                 # subtract weight
+
+        # 2) TRANSLATIONAL COM‐COUPLING
+        ω     = x_curr[10:13]        # body‐frame angular vel
+        α     = dx[10:13]            # body‐frame angular accel
+        # dv_c in body: ω×(ω×r_c) + r_c×α
+        dv_c_b = np.cross(ω, np.cross(ω, r_c)) + np.cross(r_c, α)
+        dv_c_w = R @ dv_c_b          # into world frame
+        F_coup = m * dv_c_w          # mass × coupling accel
+
+        # total force (world)
+        b_trans = F_w + F_coup       # = m*(dv_base + dv_c)
+
+        # 3) MOTOR TORQUES (body)
+        tau_motors = np.array([
+            [-self.el*self.kt, -self.el*self.kt,  self.el*self.kt,  self.el*self.kt],
+            [-self.el*self.kt,  self.el*self.kt,  self.el*self.kt, -self.el*self.kt],
+            [-self.km,           self.km,          -self.km,          self.km]
+        ]) @ u_curr
+
+        # 4) ROTATIONAL COM‐COUPLING TORQUE
+        # dv_base in body = F_b/m + Rᵀ [0,0,−g]
+        dv_base_b = F_b/m + R.T @ np.array([0.0, 0.0, -self.g])
+        tau_coup  = - np.cross(c, dv_base_b)
+
+        b_rot = tau_motors + tau_coup
+
+        # stack into a flat 6-vector
+        return np.hstack([b_trans, b_rot])
+    
+    def get_data_matrix(self, x, dx):
+        # --- Translational rows (world) ---
+        a_x, a_y, a_z = dx[7:10]     # world accel
+        A = np.zeros((6,10))
+        A[0,0] = a_x
+        A[1,0] = a_y
+        A[2,0] = a_z
+
+        # --- Rotational rows (body) ---
+        # first extract body-frame accel:
+        q = x[3:7] / np.linalg.norm(x[3:7])
+        R = self.qtoQ(q)
+        a_b = R.T @ np.array([a_x, a_y, a_z])             # drop gravity since it's orthogonal
+        omega = x[10:13]
+        alpha = dx[10:13]  # body-frame angular accel
+
+        # row for τ_x = Ixx*α_x + Ixy*α_y + Ixz*α_z
+        #           + (Izz−Iyy) ω_y ω_z
+        #           −m( y_c a_{b,z} − z_c a_{b,y} )
+        A[3,1] = 0                    # m·x_c term
+        A[3,2] = -a_b[2]              # m·y_c term
+        A[3,3] = +a_b[1]              # m·z_c term
+        A[3,4] = alpha[0]             # Ixx
+        A[3,5] =      0               # Iyy (off-diags only)
+        A[3,6] =      0               # Izz
+        A[3,7] = alpha[1]             # Ixy
+        A[3,8] = alpha[2]             # Ixz
+        A[3,9] =      0               # Iyz
+        # plus you’d add the (Izz−Iyy)ω_yω_z term into columns 5 & 6
+        # and similarly fill rows 4 and 5 for τ_y and τ_z.
+
+        return A
     
     # parameter change events
     def attach_payload(self, m_p, delta_r_p):
