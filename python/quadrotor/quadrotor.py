@@ -309,11 +309,99 @@ class QuadrotorDynamics:
         self._r_off_true  = r_new
         self._J_true      = J_new
 
-    def aero_added_inertia(self, wind_speed):
+    def closest_spd(self, theta, epsilon=1e-6):
+            m, cx, cy, cz, Ixx, Iyy, Izz, Ixy, Ixz, Iyz = theta
+            A = np.array([[Ixx, Ixy, Ixz],
+                        [Ixy, Iyy, Iyz],
+                        [Ixz, Iyz, Izz]])
+            # Step 1: Symmetrize
+            A_sym = 0.5 * (A + A.T)
+
+            # Step 2: Eigen-decomposition
+            eigvals, eigvecs = np.linalg.eigh(A_sym)
+
+            # Step 3: Clamp eigenvalues to be > epsilon
+            eigvals_clamped = np.clip(eigvals, epsilon, None)
+
+            # Step 4: Reconstruct SPD matrix
+            A_spd = eigvecs @ np.diag(eigvals_clamped) @ eigvecs.T
+
+            Ixx_spd, Iyy_spd, Izz_spd = A_spd[0, 0], A_spd[1, 1], A_spd[2, 2]
+            Ixy_spd, Ixz_spd, Iyz_spd = A_spd[0, 1], A_spd[0, 2], A_spd[1, 2]
+
+            theta_spd = np.array([m, cx, cy, cz, Ixx_spd, Iyy_spd, Izz_spd, Ixy_spd, Ixz_spd, Iyz_spd])
+
+            return theta_spd
+    def aero_added_inertia(self, wind_vec):
         # scale factor k
-        k = 1e-6  
-        deltaJ = k * wind_speed**2 * np.eye(3)
-        return self._J_true + deltaJ
+        k = 1e-6 
+        wind_speed = np.linalg.norm(wind_vec)
+        if wind_speed == 0:
+            return # No wind, no change
+
+        # Normalize wind direction
+        wind_dir = wind_vec / wind_speed 
+        P = np.eye(3) - np.outer(wind_dir, wind_dir)
+        deltaJ = k * wind_speed**2 * P
+        J = self._J_true+deltaJ
+        Ixx, Iyy, Izz = J[0, 0], J[1, 1], J[2, 2]
+        Ixy, Ixz, Iyz = J[0, 1], J[0, 2], J[1, 2]
+        c = self._mass_true * self._r_off_true
+        Ixx = Iyy = (Ixx + Iyy)/2
+        theta = np.array([self._mass_true, *c, Ixx, Iyy, Izz, Ixy, Ixz, Iyz])
+        new_theta = self.closest_spd(theta)
+       
+        self._mass_true     = new_theta[0]
+        new_c     = new_theta[1:4]  # = m * r_off
+        cx, cy, cz = new_c
+        self._r_off_true = np.array([cx, cy, cz]) / self._mass_true
+        I_new     = new_theta[4:] 
+        Ixx, Iyy, Izz, Ixy, Ixz, Iyz = I_new
+        self._J_true = np.array([
+            [Ixx, Ixy, Ixz],
+            [Ixy, Iyy, Iyz],
+            [Ixz, Iyz, Izz]
+        ])
+    def add_drift(self, mass_std=0.0, intertia_std=0.0, com_std=0.0):
+        # 1. Get the current true parameters
+        theta_true = self.get_true_inertial_params()
+        self._     = theta_true[0]
+        c_true     = theta_true[1:4]   # = m * r_off
+        I_true     = theta_true[4:]    # = [Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
+
+        # 2. Sample Gaussian drift
+        m_drift = np.random.normal(0.0, mass_std)
+        c_drift = np.random.normal(0.0, com_std, size=3)
+        I_drift = np.random.normal(0.0, intertia_std, size=6)
+
+        # 3. Add drift
+        m_new = self._ + m_drift
+        c_new = c_true + c_drift
+        I_new = I_true + I_drift
+        Ixx, Iyy, Izz, Ixy, Ixz, Iyz = I_new
+        Ixx = Iyy = (Ixx + Iyy)/2
+        theta = np.array([m_new, *c_new, Ixx, Iyy, Izz, Ixy, Ixz, Iyz])
+        new_theta = self.closest_spd(theta)
+       
+        self._mass_true     = new_theta[0]
+        new_c     = new_theta[1:4]   # = m * r_off
+        cx, cy, cz = new_c
+        self._r_off_true = np.array([cx, cy, cz]) / self._mass_true
+        I_new     = new_theta[4:] 
+        Ixx, Iyy, Izz, Ixy, Ixz, Iyz = I_new
+        self._J_true = np.array([
+            [Ixx, Ixy, Ixz],
+            [Ixy, Iyy, Iyz],
+            [Ixz, Iyz, Izz]
+        ])
+
+        # (Optional) Store drift for inspection
+        self.drift = {
+            'mass': m_drift,
+            'com': c_drift,
+            'inertia': I_drift
+        }
+    
 
     @staticmethod
     def hat(v: np.ndarray) -> np.ndarray:
