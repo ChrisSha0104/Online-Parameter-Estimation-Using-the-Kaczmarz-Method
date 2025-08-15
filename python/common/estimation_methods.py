@@ -76,77 +76,96 @@ class KF:
         return self.theta_hat
     
 class RK:
-    def __init__(self, num_params, alpha=0.99, epsilon=1e-8, x0=None):
+    def __init__(self, num_params, x0=None, num_iters=100):
+        """
+        Classic Randomized Kaczmarz algorithm.
+
+        Args:
+            A: (m, n) matrix
+            b: (m,) or (m, 1) vector
+            x0: (n,) or (n, 1) initial guess
+            num_iters: number of iterations
+
+        Returns:
+            x: (n,) solution estimate
+        """
         self.num_params = num_params
-        self.alpha = alpha
-        self.epsilon = epsilon  # Small value to prevent division by zero
-        self.x = (
-            x0.reshape(num_params, 1) if x0 is not None else np.zeros((num_params, 1))
-        )
+        self.x0 = x0 if x0 is not None else np.zeros(num_params, )
+        self.num_iters = num_iters
+    
+    def iterate(self, A, b):
+        m, n = A.shape
+        b = b.reshape(-1, 1)
+        x = np.zeros((self.num_params, 1)) if self.x0 is None else self.x0.reshape(self.num_params, 1)
 
-    def iterate(self, A, b, x0=None, num_iterations=1000, tol=0.01):
+        row_norms_sq = np.sum(A**2, axis=1)
+        prob = row_norms_sq / np.sum(row_norms_sq)
+
+        num_iter = m
+
+        for _ in range(num_iter):
+            i = np.random.choice(m, p=prob)
+            a_i = A[i].reshape(1, -1)   # shape (1, n)
+            b_i = b[i]                  # scalar
+            norm_sq = row_norms_sq[i]
+
+            # Projection update
+            residual = b_i - a_i @ x
+            # print("residual_norm:", f"{np.linalg.norm(residual):.4g}")
+            x += (residual / norm_sq) * a_i.T
+
+        return x.flatten()
+    
+class TARK:
+    def __init__(self, num_params, x0=None):
         """
-        A: (num_states, num_param)
-        x: (num_param, 1)
-        b: (num_states, 1)
+        Tail-Averaged Randomized Kaczmarz.
+
+        Args:
+            A: (m, n) matrix
+            b: (m,) or (m,1) vector
+            x0: optional initial guess (n,) or (n,1)
         """
-        self.A = A
-        self.b = b
-        self.m = A.shape[0]  # m is the number of rows, n is the number of columns
-        self.n = A.shape[1]
+        self.num_params = num_params
+        self.x = np.zeros((num_params, 1)) if x0 is None else x0.reshape(num_params, 1)
 
-        max_iter = 0
-        
-        if x0 is not None:
-            self.x = x0.reshape(self.num_params, 1)
+    def iterate(self, A, b, burnin: int = 0, total_iters: int = 100):
+        """
+        Run TARK iterations and return the tail-averaged solution.
 
-        for _ in range(num_iterations): 
-            max_iter += 1
+        Args:
+            burnin: number of initial iterations to ignore in averaging
+            total_iters: total number of iterations
 
-            # Compute exponential weighting for the rows
-            row_norms = np.linalg.norm(A, axis=1) ** 2
+        Returns:
+            x_avg: (n,) tail-averaged solution
+        """
 
-            # Normalize by subtracting the maximum (robust to large values)
-            row_norms -= np.max(row_norms)
+        x = self.x.copy()
+        x_sum = np.zeros_like(x)
+        count = 0
 
-            # Scale by alpha (can be adjusted for better performance)
-            row_norms *= self.alpha
+        row_norms_sq = np.sum(A**2, axis=1)
+        probs = row_norms_sq / np.sum(row_norms_sq)
 
-            # Add epsilon to prevent division by zero or log(0)
-            row_norms += self.epsilon
+        num_iters = A.shape[0]
 
-            # Exponentiate (more stable now due to normalization)
-            exponential_weights = np.exp(row_norms)
+        for s in range(num_iters):
+            i = np.random.choice(A.shape[0], p=probs)
+            a_i = A[i].reshape(1, -1)
+            b_i = b[i]
+            norm_sq = row_norms_sq[i]
 
-            # Calculate probabilities (should be stable now)
-            probabilities = exponential_weights / np.sum(exponential_weights)
+            # RK update
+            x += ((b_i - a_i @ x) / norm_sq) * a_i.T
 
-            # Ensure probabilities sum to 1 (handle potential rounding errors)
-            probabilities /= np.sum(probabilities)
+            # Tail averaging
+            if s >= burnin:
+                x_sum += x
+                count += 1
 
-            i = np.random.choice(self.m, p=probabilities.flatten())
-            a_i = np.array(self.A[i]).reshape(1, -1)  # Ensure a_i is a row vector
-            b_i = np.array(self.b[i]).reshape(1, 1)  # Ensure b_i is a column vector
-
-            # Ensure that a_i has more than one element before calculating the norm
-            if a_i.size > 1:
-                norm_a_i = np.linalg.norm(a_i)
-            else:
-                norm_a_i = np.abs(a_i)  # Fallback for single-element case
-
-            residual = np.dot(self.A, self.x) - b
-
-            if np.abs(residual).sum() < tol:
-                print("tolerance hit")
-                break
-
-            # Ensure the denominator is not too close to zero before division
-            if norm_a_i > 1e-6:
-                increment = ((b_i - np.dot(a_i, self.x)) / (norm_a_i**2)) * a_i.T
-            else:
-                increment = np.zeros((self.n, 1))
-
-            increment = increment.reshape(self.n, 1)
-            self.x = self.x + increment
-
-        return self.x, max_iter
+        x_avg = x_sum / count
+        return x_avg.flatten()
+    
+class DEKA:
+    pass

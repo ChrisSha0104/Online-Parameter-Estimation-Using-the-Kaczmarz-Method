@@ -10,7 +10,7 @@ from scipy.ndimage import uniform_filter1d
 from python.quadrotor.quadrotor import QuadrotorDynamics
 from python.common.LQR_controller import LQRController
 from python.common.noise_models import *   # for apply_noise
-from python.common.estimation_methods import RLS, KF, RK
+from python.common.estimation_methods import *
 
 np.random.seed(42)
 np.set_printoptions(precision=7, suppress=True)
@@ -122,8 +122,8 @@ def get_error_state(quad, x, xg):
     return np.hstack([pos_err, phi, vel_err, om_err])
 
 def main():
-    estimator_options = "lstsq" # gt, none, rk, rls, kf
-    assert estimator_options in ["gt", "none", "lstsq", "rk", "rls", "kf"], \
+    estimator_options = "tark" # gt, none, rk, rls, kf
+    assert estimator_options in ["gt", "none", "lstsq", "rk", "tark", "rls", "kf"], \
         "Invalid estimator option. Choose from 'gt', 'none', 'rk', 'rls', 'kf'."
 
     quad = QuadrotorDynamics()
@@ -170,12 +170,14 @@ def main():
     _have_estimator = (estimator_options != "none")
 
     if estimator_options == "rls":
-        estimator = RLS(num_params=theta.shape[0], theta_hat=theta, forgetting_factor=0.95, c=1000)
+        estimator = RLS(num_params=theta.shape[0], theta_hat=theta, forgetting_factor=0.7, c=1000)
     elif estimator_options == "kf":
         estimator = KF(num_params=theta.shape[0], process_noise=1e-4*np.eye(theta.shape[0]),
-                       measurement_noise=1e-4*np.eye(3), theta_hat=theta, c=1000)
+                       measurement_noise=1e-4*np.eye(6), theta_hat=theta, c=1000)
     elif estimator_options == "rk":
-        estimator = RK(num_params=theta.shape[0], x0=theta, c=1000)
+        estimator = RK(num_params=theta.shape[0], x0=theta)
+    elif estimator_options == "tark":
+        estimator = TARK(num_params=theta.shape[0], x0=theta)
 
     event_step = 250
 
@@ -207,7 +209,10 @@ def main():
         # force residual on measured
         dx_meas = (x_meas_next - x_meas)/dt
         A_mat = quad.get_data_matrix(x_meas, dx_meas)
+        A_norm = np.linalg.norm(A_mat)
+        A_mat /= A_norm
         b_vec = quad.get_force_vector(x_meas, dx_meas, u) #+ np.random.normal(0, 1e-9, size=(A_mat.shape[0],))        
+        b_vec /= A_norm
 
         theta_gt   = quad.get_true_inertial_params()
         err_gt     = mean_relative_error(A_mat @ theta_gt, b_vec)
@@ -227,7 +232,7 @@ def main():
             else: 
                 if estimator_options == "lstsq":
                     theta_est = np.linalg.lstsq(A_mat, b_vec, rcond=None)[0]
-                elif estimator_options == "rls" or estimator_options == "kf" or estimator_options == "rk":
+                else:
                     theta_est = estimator.iterate(A_mat, b_vec)
 
                 theta_est[4] = theta_est[5] = np.mean(theta_est[4:6])
@@ -245,8 +250,6 @@ def main():
             print("A_mat @ theta_est:", A_mat @ theta_est)
             print("b_vec:", b_vec)
 
-
-        # import pdb; pdb.set_trace()  # Debugging breakpoint
         meas_noise.append(noise_vec.copy())
 
         print(f"Step {k+1}/{len(t)}: ")

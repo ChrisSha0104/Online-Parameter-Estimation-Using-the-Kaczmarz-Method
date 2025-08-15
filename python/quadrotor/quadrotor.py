@@ -199,39 +199,6 @@ class QuadrotorDynamics:
         return self.E(x_ref[3:7]).T @ A @ self.E(x_ref[3:7]), \
                self.E(x_ref[3:7]).T @ B
 
-    # def get_data_matrix(self, x_curr, dx):
-    #     a_x, a_y, a_z = dx[7:10]
-    #     a_p, a_q, a_r = dx[10:13]
-    #     w_x, w_y, w_z = x_curr[10:13]
-
-    #     # First moment terms: r_off = [x_c, y_c, z_c] -> m*x_c, m*y_c, m*z_c as variables
-    #     A = np.array([
-    #         [a_x, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    #         [a_y, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    #         [a_z, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    #         [0, a_p, a_q - w_x*w_z, a_r + w_x*w_y, -w_y*w_z, w_y**2 + w_z**2, w_y*w_z, 0, -a_z, a_y],
-    #         [0, w_x*w_z, a_p + w_y*w_z, w_z**2 - w_x**2, a_q, a_r - w_x*w_y, -w_x*w_z, a_z, 0, -a_x],
-    #         [0, -w_x*w_y, w_x**2 - w_y**2, a_p - w_y*w_z, w_x*w_y, a_q + w_x*w_z, a_r, -a_y, a_x, 0]
-    #     ], dtype=np.float64)
-    #     return A
-    
-    # def get_force_vector(self, x_curr, u_curr):
-    #     R = self.qtoQ(x_curr[3:7])
-    #     m = self._mass_true
-    #     c = self._mass_true * self._r_off_true
-
-    #     F_b = np.array([[0], [0], [np.sum(u_curr) * self.kt]])
-    #     F_w = R @ F_b
-    #     F_w[2] -= m * self.g
-
-    #     tau_b = np.array([
-    #         [self.el * self.kt * (-u_curr[0] - u_curr[1] + u_curr[2] + u_curr[3])],
-    #         [self.el * self.kt * (-u_curr[0] + u_curr[1] + u_curr[2] - u_curr[3])],
-    #         [self.km * (-u_curr[0] + u_curr[1] - u_curr[2] + u_curr[3])]
-    #     ])
-
-    #     tau_b += np.cross(c.reshape(3), F_b.reshape(3)).reshape(3,1)
-    #     return np.vstack([F_w, tau_b]).flatten()
     def get_force_vector(self, x_curr: np.ndarray,
                             dx:     np.ndarray,
                             u_curr: np.ndarray) -> np.ndarray:

@@ -2,3 +2,4 @@ build/
 .cache/
 .venv/
 python/__pycache__/
+output/
