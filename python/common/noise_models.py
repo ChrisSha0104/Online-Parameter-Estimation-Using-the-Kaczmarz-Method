@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-def apply_noise(x, pos_std=3e-5, rot_std_deg=0.01, vel_std=1e-6, angvel_std_deg=1e-6):
+def apply_noise(x, pos_std=1e-4, rot_std_deg=0.0, vel_std=1e-5, angvel_std_deg=0.0):
     """
     Apply physically meaningful noise to a 13D state vector.
     Args:
@@ -19,25 +19,25 @@ def apply_noise(x, pos_std=3e-5, rot_std_deg=0.01, vel_std=1e-6, angvel_std_deg=
     # 1. Position noise (Euclidean)
     x_noisy[0:3] += np.random.normal(0, pos_std, 3)
 
-    # 2. Rotation noise (SO(3)) via axis-angle
-    rot_std_rad = np.deg2rad(rot_std_deg)
-    delta_rotvec = np.random.normal(0, rot_std_rad, 3)  # axis-angle vector
-    delta_rot = R.from_rotvec(delta_rotvec)
+    # # 2. Rotation noise (SO(3)) via axis-angle
+    # rot_std_rad = np.deg2rad(rot_std_deg)
+    # delta_rotvec = np.random.normal(0, rot_std_rad, 3)  # axis-angle vector
+    # delta_rot = R.from_rotvec(delta_rotvec)
     
-    q_wxyz = x_noisy[3:7]  # quaternion in w, x, y, z order
-    q_xyzw = np.roll(q_wxyz, -1)  # convert to x, y, z, w order for scipy
-    q_orig = R.from_quat(q_xyzw)  # [x, y, z, w]
-    q_noisy = (delta_rot * q_orig).as_quat()  # apply left multiplication
+    # q_wxyz = x_noisy[3:7]  # quaternion in w, x, y, z order
+    # q_xyzw = np.roll(q_wxyz, -1)  # convert to x, y, z, w order for scipy
+    # q_orig = R.from_quat(q_xyzw)  # [x, y, z, w]
+    # q_noisy = (delta_rot * q_orig).as_quat()  # apply left multiplication
     
-    q_out = q_noisy / np.linalg.norm(q_noisy)  # normalize for safety
-    x_noisy[3:7] = np.roll(q_out, 1)  # convert back to w, x, y, z order
+    # q_out = q_noisy / np.linalg.norm(q_noisy)  # normalize for safety
+    # x_noisy[3:7] = np.roll(q_out, 1)  # convert back to w, x, y, z order
 
     # 3. Linear velocity noise (Euclidean)
     x_noisy[7:10] += np.random.normal(0, vel_std, 3)
 
-    # 4. Angular velocity noise (Euclidean)
-    angvel_std_rad = np.deg2rad(angvel_std_deg)
-    x_noisy[10:13] += np.random.normal(0, angvel_std_rad, 3)
+    # # 4. Angular velocity noise (Euclidean)
+    # angvel_std_rad = np.deg2rad(angvel_std_deg)
+    # x_noisy[10:13] += np.random.normal(0, angvel_std_rad, 3)
 
     return x_noisy
 

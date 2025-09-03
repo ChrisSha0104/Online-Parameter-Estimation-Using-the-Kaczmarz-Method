@@ -3,14 +3,17 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
-from scipy.ndimage import uniform_filter1d
+from tqdm import tqdm
+from collections import deque
+
 from python.quadrotor.quadrotor import QuadrotorDynamics
 from python.common.LQR_controller import LQRController
-from python.common.noise_models import *   # for apply_noise
-from python.common.estimation_methods import *
+from python.common.noise_models import *   # apply_noise
+from python.common.estimation_methods import *  # RLS, KF, RK, TARK
 
 np.random.seed(42)
 np.set_printoptions(precision=7, suppress=True)
@@ -30,10 +33,9 @@ def set_axes_equal(ax):
     for center, setter in zip(centers, [ax.set_xlim3d, ax.set_ylim3d, ax.set_zlim3d]):
         setter(center - span, center + span)
 
-def mean_relative_error(x_hat, x_true, eps=1e-18):
-    rel_err = np.abs(x_hat - x_true) / (np.abs(x_true) + eps)
-    # print(f"Relative error: {rel_err}")
-    return np.mean(rel_err)
+def rel_residual(A, x, b, eps=1e-12):
+    r = A @ x - b
+    return np.linalg.norm(r) / max(np.linalg.norm(b), eps)
 
 def weighted_lstsq(A: np.ndarray,
                    b: np.ndarray,
@@ -74,24 +76,15 @@ def is_valid_inertia(J):
 def closest_spd(theta, epsilon=1e-6):
     m, cx, cy, cz, Ixx, Iyy, Izz, Ixy, Ixz, Iyz = theta
     A = np.array([[Ixx, Ixy, Ixz],
-                [Ixy, Iyy, Iyz],
-                [Ixz, Iyz, Izz]])
-    # Step 1: Symmetrize
-    A_sym = 0.5 * (A + A.T)
-
-    # Step 2: Eigen-decomposition
+                  [Ixy, Iyy, Iyz],
+                  [Ixz, Iyz, Izz]])
+    A_sym = 0.5*(A + A.T)
     eigvals, eigvecs = np.linalg.eigh(A_sym)
-
-    # Step 3: Clamp eigenvalues to be > epsilon
-    eigvals_clamped = np.clip(eigvals, epsilon, None)
-
-    # Step 4: Reconstruct SPD matrix
-    A_spd = eigvecs @ np.diag(eigvals_clamped) @ eigvecs.T
-
-    Ixx_spd, Iyy_spd, Izz_spd = A_spd[0, 0], A_spd[1, 1], A_spd[2, 2]
-    Ixy_spd, Ixz_spd, Iyz_spd = A_spd[0, 1], A_spd[0, 2], A_spd[1, 2]
-
-    theta_spd = np.array([m, cx, cy, cz, Ixx_spd, Iyy_spd, Izz_spd, Ixy_spd, Ixz_spd, Iyz_spd])
+    eigvals = np.clip(eigvals, epsilon, None)
+    A_spd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+    Ixx_spd, Iyy_spd, Izz_spd = A_spd[0,0], A_spd[1,1], A_spd[2,2]
+    Ixy_spd, Ixz_spd, Iyz_spd = A_spd[0,1], A_spd[0,2], A_spd[1,2]
+    return np.array([m, cx, cy, cz, Ixx_spd, Iyy_spd, Izz_spd, Ixy_spd, Ixz_spd, Iyz_spd])
 
     return theta_spd
 
@@ -122,22 +115,22 @@ def get_error_state(quad, x, xg):
     return np.hstack([pos_err, phi, vel_err, om_err])
 
 def main():
-    estimator_options = "tark" # gt, none, rk, rls, kf
+    estimator_options = "rk" # gt, none, rk, rls, kf
     assert estimator_options in ["gt", "none", "lstsq", "rk", "tark", "rls", "kf"], \
         "Invalid estimator option. Choose from 'gt', 'none', 'rk', 'rls', 'kf'."
 
     quad = QuadrotorDynamics()
-    ug   = quad.hover_thrust_true
+    ug   = quad.hover_thrust_true.copy()
     u = ug.copy()
 
     # LQR around hover
     xg0 = np.hstack([np.zeros(3), np.array([1,0,0,0]), np.zeros(6)])
-    A, B = quad.get_linearized_true(xg0, ug)
+    A_lin, B_lin = quad.get_linearized_true(xg0, ug)
     max_dev_x = np.array([0.1,0.1,0.1,  0.5,0.5,0.05,  0.5,0.5,0.5,  0.7,0.7,0.2])
     max_dev_u = np.array([0.5,0.5,0.5,0.5])
     Q = np.diag(1.0/max_dev_x**2)
     Rmat = np.diag(1.0/max_dev_u**2)
-    lqr = LQRController(A, B, Q, Rmat)
+    lqr = LQRController(A_lin, B_lin, Q, Rmat)
 
     # Trajectory
     dt = quad.dt; T = 20.0
@@ -166,7 +159,7 @@ def main():
 
     # Estimator
     theta = quad.get_true_inertial_params()
-    theta_est = None
+    theta_est = theta.copy()
     _have_estimator = (estimator_options != "none")
 
     if estimator_options == "rls":
@@ -195,33 +188,26 @@ def main():
 
         # control on measured
         x_err12 = get_error_state(quad, x_meas, xg)
-        last_u = u.copy()
         u = ug + lqr.control(x_err12)
-        u = 0.5 * u + 0.5 * last_u  # low-pass filter
 
         # true propagation
         x_true_next = quad.dynamics_rk4_true(x_true, u, dt=dt)
             
         # measurement noise
         x_meas_next = apply_noise(x_true_next)
+        # x_meas_next = x_true_next.copy()
         noise_vec   = x_meas_next - x_true_next
 
         # force residual on measured
         dx_meas = (x_meas_next - x_meas)/dt
         A_mat = quad.get_data_matrix(x_meas, dx_meas)
-        A_norm = np.linalg.norm(A_mat)
-        A_mat /= A_norm
         b_vec = quad.get_force_vector(x_meas, dx_meas, u) #+ np.random.normal(0, 1e-9, size=(A_mat.shape[0],))        
-        b_vec /= A_norm
 
         theta_gt   = quad.get_true_inertial_params()
-        err_gt     = mean_relative_error(A_mat @ theta_gt, b_vec)
-        print("theta_gt:", theta_gt)
-        print("A_mat @ theta_gt:", A_mat @ theta_gt)
-        print("b_vec:", b_vec)
+        err_gt     = rel_residual(A_mat, theta_gt, b_vec)
         gt_err_traj.append(err_gt)
 
-        if _have_estimator & (k % 20 == 0):
+        if _have_estimator & (k % 20 == 0) and (k > 0):
             if estimator_options == "gt":
                 # use true parameters
                 theta_est = quad.get_true_inertial_params()
@@ -236,31 +222,30 @@ def main():
                     theta_est = estimator.iterate(A_mat, b_vec)
 
                 theta_est[4] = theta_est[5] = np.mean(theta_est[4:6])
-                theta_est = closest_spd(theta_est)  # ensure SPD
-
+                theta_est = closest_spd(theta_est)
                 quad.set_estimated_inertial_params(theta_est)
                 ug = quad.get_hover_thrust_est()
                 A_new, B_new = quad.get_linearized_est(xg, ug)
                 lqr.update_linearized_dynamics(A_new, B_new)
 
         if _have_estimator:
-            err_est   = mean_relative_error(A_mat @ theta_est, b_vec)
+            err_est   = rel_residual(A_mat, theta_est, b_vec)
             est_err_traj.append(err_est)
-            print("theta_est:", theta_est)
-            print("A_mat @ theta_est:", A_mat @ theta_est)
-            print("b_vec:", b_vec)
 
         meas_noise.append(noise_vec.copy())
 
-        print(f"Step {k+1}/{len(t)}: ")
-                # f"True pos: {x_true_next[0:3]}, "
-                # f"Measured pos: {x_meas_next[0:3]}, "
-                # f"GT error: {err_gt:.4f}, "
-                # f"Est error: {err_est:.4f}" if _have_estimator else "")
+        print(f"Step {k+1}/{len(t)}: "
+                f"A_mat: {A_mat}, "
+                f"b_vec: {b_vec}, "
+                f"theta est: {theta_est}, "
+                f"theta gt: {theta_gt}, "
+                f"residual est: {rel_residual(A_mat, theta_est, b_vec)}, "
+                f"residual gt: {rel_residual(A_mat, theta_gt, b_vec)}")
 
         # perturb theta
         if k == event_step:
-            quad.attach_payload(m_p=0.015, delta_r_p=np.array([0.001, -0.0011, -0.001]))
+            quad.attach_payload(m_p=0.02, delta_r_p=np.array([0.002, -0.002, -0.001]))
+            
             print(f"Payload attached at t={t[k]:.2f}s, new theta:\n{theta}")
 
         # step

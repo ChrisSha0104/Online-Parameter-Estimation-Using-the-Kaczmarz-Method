@@ -22,6 +22,15 @@ class QuadrotorDynamics:
         # COM offset (first moment) for the true plant
         self._r_off_true = np.zeros(3) if r_off is None else np.array(r_off)
 
+        # Keep a baseline copy so we can reset
+        self._mass_base   = float(self._mass_true)
+        self._r_off_base  = self._r_off_true.copy()
+        self._J_base      = self._J_true.copy()
+
+        # Stack of attached payloads (most-recent last)
+        # Each entry: {"m": m_p, "d": delta_r_p}
+        self._payloads = []
+
         # True per‑motor hover thrust
         self.hover_thrust_true = (self._mass_true * self.g / self.kt / 4) * np.ones(4)
 
@@ -258,56 +267,137 @@ class QuadrotorDynamics:
         return np.hstack([b_trans, b_rot])
     
     def get_data_matrix(self, x, dx):
-        # --- Translational rows (world) ---
-        a_x, a_y, a_z = dx[7:10]     # world accel
-        A = np.zeros((6,10))
-        A[0,0] = a_x
-        A[1,0] = a_y
-        A[2,0] = a_z
+        """
+        Build the 6x10 data matrix A so that A @ theta = b, where
+        theta = [m, m*x_c, m*y_c, m*z_c, Ixx, Iyy, Izz, Ixy, Ixz, Iyz].
 
-        # --- Rotational rows (body) ---
-        # first extract body-frame accel:
+        Exact equality holds with `get_force_vector` provided both are
+        called on the same (x, dx, u) and you put *all* COM torque terms
+        in b (as your get_force_vector does via tau_coup).
+        """
+        # ---- unpack state/derivatives ----
         q = x[3:7] / np.linalg.norm(x[3:7])
-        R = self.qtoQ(q)
-        a_b = R.T @ np.array([a_x, a_y, a_z])             # drop gravity since it's orthogonal
-        omega = x[10:13]
-        alpha = dx[10:13]  # body-frame angular accel
+        # R not needed here (A uses world a and body alpha/omega)
+        a_world = dx[7:10]           # world translational acceleration
+        omega   = x[10:13]           # body angular velocity
+        alpha   = dx[10:13]          # body angular acceleration
 
-        # row for τ_x = Ixx*α_x + Ixy*α_y + Ixz*α_z
-        #           + (Izz−Iyy) ω_y ω_z
-        #           −m( y_c a_{b,z} − z_c a_{b,y} )
-        A[3,1] = 0                    # m·x_c term
-        A[3,2] = -a_b[2]              # m·y_c term
-        A[3,3] = +a_b[1]              # m·z_c term
-        A[3,4] = alpha[0]             # Ixx
-        A[3,5] =      0               # Iyy (off-diags only)
-        A[3,6] =      0               # Izz
-        A[3,7] = alpha[1]             # Ixy
-        A[3,8] = alpha[2]             # Ixz
-        A[3,9] =      0               # Iyz
-        # plus you’d add the (Izz−Iyy)ω_yω_z term into columns 5 & 6
-        # and similarly fill rows 4 and 5 for τ_y and τ_z.
+        wx, wy, wz = omega
+        ax, ay, az = alpha
+
+        # ---- A matrix ----
+        A = np.zeros((6, 10))
+
+        # (1) Translational:   m * a_world  == b_trans
+        A[0, 0] = a_world[0]  # mass column
+        A[1, 0] = a_world[1]
+        A[2, 0] = a_world[2]
+
+        # (2) Rotational:  J*alpha + omega x (J*omega)  == b_rot  (in body frame)
+        # Columns 4..9 correspond to [Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
+        # 2a) J * alpha part (linear in inertia)
+        M_alpha = np.array([
+            [ax, 0.0, 0.0, ay, az, 0.0],   # tau_x
+            [0.0, ay, 0.0, ax, 0.0, az],   # tau_y
+            [0.0, 0.0, az, 0.0, ax, ay],   # tau_z
+        ])
+
+        # 2b) Gyro part: omega x (J*omega)
+        # Do it generically via basis actions E_k * omega for each inertia element.
+        e_Ixx = np.array([wx, 0.0, 0.0])
+        e_Iyy = np.array([0.0, wy, 0.0])
+        e_Izz = np.array([0.0, 0.0, wz])
+        e_Ixy = np.array([wy, wx, 0.0])    # because J_xy = J_yx
+        e_Ixz = np.array([wz, 0.0, wx])    # because J_xz = J_zx
+        e_Iyz = np.array([0.0, wz, wy])    # because J_yz = J_zy
+
+        def cross_w(v):
+            # return omega x v
+            return np.array([wy*v[2] - wz*v[1],
+                            wz*v[0] - wx*v[2],
+                            wx*v[1] - wy*v[0]])
+
+        M_gyro = np.column_stack([
+            cross_w(e_Ixx),  # column for Ixx
+            cross_w(e_Iyy),  # column for Iyy
+            cross_w(e_Izz),  # column for Izz
+            cross_w(e_Ixy),  # column for Ixy
+            cross_w(e_Ixz),  # column for Ixz
+            cross_w(e_Iyz),  # column for Iyz
+        ])
+
+        # Fill rotational block; note: columns 1..3 (first moments) are ZERO here,
+        # because COM torque terms (-c x a_base_b) are accounted for in b, not in A.
+        A[3:6, 4:10] = M_alpha + M_gyro
 
         return A
+
     
     # parameter change events
     def attach_payload(self, m_p, delta_r_p):
-        # delta_r_p: vector in body frame where payload attaches
+        """
+        Attach a point-mass payload of mass m_p at body-frame position delta_r_p
+        (relative to the vehicle body origin). Updates mass, COM, inertia via
+        parallel-axis theorem.
+        """
         m_old = self._mass_true
         r_old = self._r_off_true
         J_old = self._J_true
 
         m_new = m_old + m_p
-        # update COM
-        r_new = (m_old*r_old + m_p*delta_r_p) / m_new
-        # update J via parallel‐axis
-        d = delta_r_p
-        Jp = m_p * (np.dot(d,d)*np.eye(3) - np.outer(d,d))
+        d = np.array(delta_r_p, dtype=float)
+
+        # Update COM (body frame)
+        r_new = (m_old * r_old + m_p * d) / m_new
+
+        # Parallel-axis for a point mass at offset d
+        Jp = m_p * (np.dot(d, d) * np.eye(3) - np.outer(d, d))
         J_new = J_old + Jp
 
-        self._mass_true  = m_new
-        self._r_off_true  = r_new
-        self._J_true      = J_new
+        self._mass_true  = float(m_new)
+        self._r_off_true = r_new
+        self._J_true     = J_new
+
+        # Keep a record so we can detach later
+        self._payloads.append({"m": float(m_p), "d": d})
+
+        # Keep hover thrust consistent with true mass
+        self.hover_thrust_true = (self._mass_true * self.g / self.kt / 4) * np.ones(4)
+
+    def detach_payload(self):
+        """
+        Detach (drop) the most recently attached payload.
+        Raises if none are attached, or if the result would be non-physical.
+        """
+        if not self._payloads:
+            raise RuntimeError("No payload to detach.")
+
+        entry = self._payloads.pop()  # LIFO
+        m_p, d = entry["m"], entry["d"]
+
+        m_old = self._mass_true
+        r_old = self._r_off_true
+        J_old = self._J_true
+
+        m_new = m_old - m_p
+        if m_new <= 0:
+            # Put it back and fail to avoid corrupting state
+            self._payloads.append(entry)
+            raise ValueError(f"Detaching payload would result in non-positive mass (m_new={m_new}).")
+
+        # Inverse of the weighted-mean COM update
+        r_new = (m_old * r_old - m_p * d) / m_new
+
+        # Subtract the same parallel-axis term that was added
+        Jp = m_p * (np.dot(d, d) * np.eye(3) - np.outer(d, d))
+        J_new = J_old - Jp
+
+        self._mass_true  = float(m_new)
+        self._r_off_true = r_new
+        self._J_true     = J_new
+
+        # Update true hover thrust
+        self.hover_thrust_true = (self._mass_true * self.g / self.kt / 4) * np.ones(4)
 
     def aero_added_inertia(self, wind_speed):
         # scale factor k
