@@ -16,8 +16,8 @@ from python.common.estimation_methods import *  # RLS, KF, RK, TARK, IGRK, MGRK,
 
 np.set_printoptions(precision=7, suppress=True)
 
-ALGOS_DEFAULT = ["deka", "rk", "tark", "rls", "kf", "gt", "none"]
-REF_CHOICES   = ("hover", "figure8", "circle", "lissajous")
+ALGOS_DEFAULT = ["deka", "rk", "tark", "rls", "kf", "gt", "none", "mgrk", "igrk", "rek"]
+REF_CHOICES   = ["hover", "figure8", "circle", "lissajous"]
 
 # ----------------------- helpers -----------------------
 def rel_residual(A, x, b, eps=1e-12):
@@ -294,14 +294,15 @@ def _trial_worker(estimator_name, base_seed, seed_offset, est_freq, window, ref_
     except Exception as e:
         return (False, seed_offset, repr(e))
 
-# ----------------------- main (parallel per algo) -----------------------
+# ----------------------- main (parallel per algo, multi-refs) -----------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", type=str, default="results_param_estimation")
     ap.add_argument("--ntrials", type=int, default=8)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--algos", type=str, nargs="*", default=ALGOS_DEFAULT)
-    ap.add_argument("--ref", type=str, default="figure8", choices=REF_CHOICES)
+    ap.add_argument("--refs", type=str, nargs="+", default=REF_CHOICES,
+                    help="One or more trajectory types; results are concatenated and labeled")
     ap.add_argument("--est_freq", type=int, default=20)
     ap.add_argument("--window",   type=int, default=1)
     ap.add_argument("--save_traj", action="store_true")
@@ -310,7 +311,7 @@ def main():
     ap.add_argument("--workers", type=int, default=16,
                     help="Process workers (default: os.cpu_count())")
     ap.add_argument("--seed_budget_factor", type=float, default=5.0,
-                    help="Max attempts per algo = ntrials * factor; failures are skipped.")
+                    help="Max attempts per algo per ref = ntrials * factor; failures are skipped.")
     args = ap.parse_args()
 
     outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
@@ -319,107 +320,127 @@ def main():
     BASE_SEED = int(args.seed)
     est_freq  = int(args.est_freq)
     window    = int(args.window)
-    ref_type  = str(args.ref)
+    ref_types = [str(r) for r in args.refs]
     workers   = args.workers
-    seed_budget = max(N_TRIAL, int(np.ceil(N_TRIAL * float(args.seed_budget_factor))))
+    seed_budget_per_ref = max(N_TRIAL, int(np.ceil(N_TRIAL * float(args.seed_budget_factor))))
     T_sim = 20.0
 
-    # probe time axes
+    # probe time axes (same dt/T for all refs by construction)
     probe = QuadrotorDynamics()
-    t_all, _, _ = TRAJ_FACTORY[ref_type](T_sim, probe.dt, np.random.default_rng(0))
+    t_all, _, _ = make_traj_hover(T_sim, probe.dt, np.random.default_rng(0))
     t = t_all
     t_est = t[::est_freq][1:]
 
-    # storage
+    # storage across ALL refs
     store = {
         algo: {"pos": [], "vel": [], "ori": [], "est": [],
                "xm": [] if args.save_traj else None,
                "xr": [] if args.save_traj else None}
         for algo in ALGOS
     }
-    event_idx_trials = np.full((N_TRIAL, 2), -1, dtype=int)
+    # event idx & labels per *trial across refs*
+    event_idx_all = []
+    traj_labels   = []  # one label per trial (across refs)
 
-    # run per algo (sequentially), trials in parallel
-    import os
-    for a_idx, algo in enumerate(ALGOS):
-        print(f"\n[algo={algo}] collecting {N_TRIAL} successful trials with up to {seed_budget} attempts "
-              f"({workers} workers)…")
-        successes = 0
-        attempts = 0
-        seed_offset_next = 0
+    # run per ref type, trials in parallel for each algo
+    for ref_type in ref_types:
+        print(f"\n=== Running ref_type='{ref_type}' ===")
+        # collect successes count so we can pad as needed at the end of each algo for this ref
+        successes_per_algo = {algo: 0 for algo in ALGOS}
+        # For sharing event_idx: only capture from the first algorithm processed below
+        first_algo_events_this_ref = []
 
-        # Keep a pool of inflight futures up to 'workers'
-        with ProcessPoolExecutor(max_workers=workers) as ex:
-            inflight = {}
+        for a_idx, algo in enumerate(ALGOS):
+            print(f"\n[algo={algo}] collecting {N_TRIAL} successful trials with up to "
+                  f"{seed_budget_per_ref} attempts ({workers} workers)…")
+            successes = 0
+            attempts = 0
+            seed_offset_next = 0
 
-            # Prime the queue
-            while len(inflight) < workers and attempts < seed_budget and successes < N_TRIAL:
-                fut = ex.submit(_trial_worker, algo, BASE_SEED, seed_offset_next,
-                                est_freq, window, ref_type, T_sim)
-                inflight[fut] = seed_offset_next
-                seed_offset_next += 1
-                attempts += 1
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                inflight = {}
 
-            while successes < N_TRIAL and attempts <= seed_budget and inflight:
-                done, _ = wait(inflight, return_when=FIRST_COMPLETED)
-                for fut in done:
-                    seed_used = inflight.pop(fut)
-                    ok, _, payload = fut.result()
-                    if ok:
-                        out = payload
-                        # success => store
-                        store[algo]["pos"].append(out["abs_mean_pos_err_t"])
-                        store[algo]["vel"].append(out["abs_mean_vel_err_t"])
-                        store[algo]["ori"].append(out["abs_mean_ori_err_t"])
-                        store[algo]["est"].append(out["est_err_t"])
-                        if args.save_traj:
-                            store[algo]["xm"].append(out["x_meas_traj"])
-                            store[algo]["xr"].append(out["x_ref_traj"])
+                # Prime
+                while len(inflight) < workers and attempts < seed_budget_per_ref and successes < N_TRIAL:
+                    fut = ex.submit(_trial_worker, algo, BASE_SEED, seed_offset_next,
+                                    est_freq, window, ref_type, T_sim)
+                    inflight[fut] = seed_offset_next
+                    seed_offset_next += 1
+                    attempts += 1
 
-                        # record shared events from the FIRST algorithm only
-                        if a_idx == 0 and event_idx_trials[successes, 0] == -1:
-                            event_idx_trials[successes] = out["event_idx"]
+                while successes < N_TRIAL and attempts <= seed_budget_per_ref and inflight:
+                    done, _ = wait(inflight, return_when=FIRST_COMPLETED)
+                    for fut in done:
+                        seed_used = inflight.pop(fut)
+                        ok, _, payload = fut.result()
+                        if ok:
+                            out = payload
+                            # success => store
+                            store[algo]["pos"].append(out["abs_mean_pos_err_t"])
+                            store[algo]["vel"].append(out["abs_mean_vel_err_t"])
+                            store[algo]["ori"].append(out["abs_mean_ori_err_t"])
+                            store[algo]["est"].append(out["est_err_t"])
+                            if args.save_traj:
+                                store[algo]["xm"].append(out["x_meas_traj"])
+                                store[algo]["xr"].append(out["x_ref_traj"])
 
-                        successes += 1
-                        print(f"[{algo}] success {successes}/{N_TRIAL} (seed_offset={seed_used})")
-                    else:
-                        # skip and continue
-                        print(f"[{algo}] failed attempt (seed_offset={seed_used}): {payload}")
+                            # events (from the FIRST algo only) + labels
+                            if a_idx == 0:
+                                first_algo_events_this_ref.append(out["event_idx"])
+                                traj_labels.append(ref_type)
 
-                    # Refill the queue
-                    if attempts < seed_budget and successes < N_TRIAL:
-                        fut_new = ex.submit(_trial_worker, algo, BASE_SEED, seed_offset_next,
-                                            est_freq, window, ref_type, T_sim)
-                        inflight[fut_new] = seed_offset_next
-                        seed_offset_next += 1
-                        attempts += 1
+                            successes += 1
+                            successes_per_algo[algo] += 1
+                            print(f"[{ref_type} | {algo}] success {successes}/{N_TRIAL} (seed_offset={seed_used})")
+                        else:
+                            print(f"[{ref_type} | {algo}] failed attempt (seed_offset={seed_used}): {payload}")
 
-            # If we still need more successes but hit budget, pad with NaNs to keep shapes
-            if successes < N_TRIAL:
-                print(f"[WARN] {algo}: only got {successes}/{N_TRIAL} successes within seed budget "
-                      f"({seed_budget}). Padding remainder with NaNs.")
-                Tlen = len(t)
-                pad = N_TRIAL - successes
-                store[algo]["pos"].extend([np.full(Tlen, np.nan)] * pad)
-                store[algo]["vel"].extend([np.full(Tlen, np.nan)] * pad)
-                store[algo]["ori"].extend([np.full(Tlen, np.nan)] * pad)
-                store[algo]["est"].extend([np.full(max(0, len(t_est)), np.nan)] * pad)
-                if args.save_traj:
-                    store[algo]["xm"].extend([np.full((Tlen,13), np.nan)] * pad)
-                    store[algo]["xr"].extend([np.full((Tlen,13), np.nan)] * pad)
+                        # Refill
+                        if attempts < seed_budget_per_ref and successes < N_TRIAL:
+                            fut_new = ex.submit(_trial_worker, algo, BASE_SEED, seed_offset_next,
+                                                est_freq, window, ref_type, T_sim)
+                            inflight[fut_new] = seed_offset_next
+                            seed_offset_next += 1
+                            attempts += 1
+
+                # Pad if needed to keep shapes consistent across algos and refs
+                if successes < N_TRIAL:
+                    print(f"[WARN] {ref_type} | {algo}: only {successes}/{N_TRIAL} successes; padding with NaNs.")
+                    Tlen = len(t)
+                    pad = N_TRIAL - successes
+                    store[algo]["pos"].extend([np.full(Tlen, np.nan)] * pad)
+                    store[algo]["vel"].extend([np.full(Tlen, np.nan)] * pad)
+                    store[algo]["ori"].extend([np.full(Tlen, np.nan)] * pad)
+                    store[algo]["est"].extend([np.full(max(0, len(t_est)), np.nan)] * pad)
+                    if args.save_traj:
+                        store[algo]["xm"].extend([np.full((Tlen,13), np.nan)] * pad)
+                        store[algo]["xr"].extend([np.full((Tlen,13), np.nan)] * pad)
+                    # For event/label alignment, also fill labels for missing trials on first algo
+                    if a_idx == 0:
+                        first_algo_events_this_ref.extend([( -1, -1 )] * pad)
+                        traj_labels.extend([ref_type] * pad)
+
+        # After finishing all algos for this ref, extend event list once
+        event_idx_all.extend(first_algo_events_this_ref)
+
+    # Convert lists to arrays and save
+    event_idx_all = np.asarray(event_idx_all, dtype=int).reshape(-1, 2)
+    traj_labels   = np.asarray(traj_labels, dtype=str)
+    N_TOTAL = traj_labels.shape[0]
 
     # pack & save
     save_kwargs = {
-        "algos":     np.array(ALGOS),
-        "ref_type":  np.array([ref_type]),          # <--- store trajectory type
-        "ntrials":   np.array([N_TRIAL]),
-        "base_seed": np.array([BASE_SEED]),
-        "est_freq":  np.array([est_freq]),
-        "window":    np.array([window]),
-        "t":         t,
-        "t_est":     t_est,
-        "event_idx": event_idx_trials,              # (N_TRIAL, 2) from first algo’s successes
-        "event_time": t[event_idx_trials],          # convenience (N_TRIAL, 2)
+        "algos":       np.array(ALGOS),
+        "ref_types":   np.array(ref_types, dtype=str),     # unique types used in this run
+        "traj_labels": traj_labels,                        # per-trial labels (length N_TOTAL)
+        "ntrials":     np.array([N_TOTAL]),
+        "base_seed":   np.array([BASE_SEED]),
+        "est_freq":    np.array([est_freq]),
+        "window":      np.array([window]),
+        "t":           t,
+        "t_est":       t_est,
+        "event_idx":   event_idx_all,                      # (N_TOTAL, 2) from first algo’s trials
+        "event_time":  t[np.clip(event_idx_all, 0, len(t)-1)],  # convenience
         "event_labels": np.array(["add", "drop"]),
     }
     for algo in ALGOS:

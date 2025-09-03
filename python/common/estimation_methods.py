@@ -78,7 +78,9 @@ class RK:
         row_norms_sq = (A * A).sum(axis=1) + eps
         probs = row_norms_sq / row_norms_sq.sum()
 
-        for _ in range(m * n):
+        num_iter = m * n 
+        
+        for _ in range(num_iter):
             i = np.random.choice(m, p=probs)
             ai = A[i]                        # (n,)
             residual = b[i] - ai @ x
@@ -112,8 +114,9 @@ class TARK:
         row_norms_sq = (A * A).sum(axis=1) + eps
         probs = row_norms_sq / row_norms_sq.sum()
 
-        total_iters = m * n
-        for s in range(total_iters):
+        num_iter = m * n
+
+        for s in range(num_iter):
             i = np.random.choice(m, p=probs)
             ai = A[i]
             residual = b[i] - ai @ x
@@ -291,7 +294,8 @@ class REK:
         p_rows = row_norm2 / row_norm2.sum()
         p_cols = col_norm2 / col_norm2.sum()
 
-        for _ in range(m * n):
+        num_iter = m * n
+        for _ in range(num_iter):
             # Column step: update z
             j = np.random.choice(n, p=p_cols)
             a_col = A[:, j]                          # (m,)
@@ -329,9 +333,9 @@ class DEKA:
         num_params,
         x0=None,
         eps=1e-12,
-        gamma=0.5,
+        gamma=1.0,
         reg=1e-12,
-        alpha=0.3,
+        alpha=0.1,
         tol=1e-8,
     ):
         self.num_params = int(num_params)
@@ -367,7 +371,8 @@ class DEKA:
         row_norm2 = (A * A).sum(axis=1) + self.eps       # (m,)
         fro2 = (A * A).sum() + self.eps                  # ||A||_F^2
 
-        for _ in range(m * n * n):
+        num_iter = m * n
+        for _ in range(num_iter):
             r = b - A @ x                                # residual vector (m,)
             r2 = float(r @ r)                            # ||r||_2^2
 
