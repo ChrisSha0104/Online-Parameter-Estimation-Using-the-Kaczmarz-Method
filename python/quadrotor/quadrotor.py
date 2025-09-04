@@ -266,6 +266,10 @@ class QuadrotorDynamics:
         # stack into a flat 6-vector
         return np.hstack([b_trans, b_rot])
     
+    def get_force_vector_from_A(self, A_mat):
+        b = A_mat @ self.get_true_inertial_params()
+        return b.reshape(-1)
+
     def get_data_matrix(self, x, dx):
         """
         Build the 6x10 data matrix A so that A @ theta = b, where

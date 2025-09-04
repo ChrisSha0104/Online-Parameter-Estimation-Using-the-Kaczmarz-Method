@@ -16,8 +16,8 @@ from python.common.estimation_methods import *  # RLS, KF, RK, TARK, IGRK, MGRK,
 
 np.set_printoptions(precision=7, suppress=True)
 
-ALGOS_DEFAULT = ["deka", "rk", "tark", "rls", "kf", "gt", "none", "mgrk", "igrk", "rek"]
-REF_CHOICES   = ["hover", "figure8", "circle", "lissajous"]
+ALGOS_DEFAULT = ["fdbk", "mgrk", "igrk", "rek", "rk", "tark", "rls", "kf", "gt"]
+REF_CHOICES   = ["figure8", "circle", "spiral", "hover", "lissajous", "ellipse", "helix"]
 
 # ----------------------- helpers -----------------------
 def rel_residual(A, x, b, eps=1e-12):
@@ -87,11 +87,64 @@ def make_traj_lissajous(T, dt, rng):
     vz = np.zeros_like(t)
     return t, np.vstack([x,y,z]).T, np.vstack([vx,vy,vz]).T
 
+
+# -------- NEW 1: ellipse (racetrack/oval) --------
+def make_traj_ellipse(T, dt, rng):
+    Ax = rng.uniform(0.5, 0.9)   # semi-major
+    By = rng.uniform(0.2, 0.5)   # semi-minor
+    z0 = rng.uniform(-0.05, 0.05)
+    omega = (2*np.pi/18.0) * rng.uniform(0.9, 1.2)
+    t = np.arange(0, T, dt)
+    x = Ax * np.cos(omega * t)
+    y = By * np.sin(omega * t)
+    z = z0 * np.ones_like(t)
+    vx = -Ax * omega * np.sin(omega * t)
+    vy =  By * omega * np.cos(omega * t)
+    vz = np.zeros_like(t)
+    return t, np.vstack([x,y,z]).T, np.vstack([vx,vy,vz]).T
+
+# -------- NEW 2: helix (circle in XY, sinusoid in Z) --------
+def make_traj_helix(T, dt, rng):
+    Rr = rng.uniform(0.3, 0.6)
+    omega_xy = (2*np.pi/16.0) * rng.uniform(0.9, 1.2)
+    z0 = rng.uniform(-0.05, 0.05)
+    z_amp = rng.uniform(0.04, 0.10)
+    omega_z = omega_xy * rng.uniform(0.4, 0.8)
+    t = np.arange(0, T, dt)
+    x = Rr * np.cos(omega_xy * t)
+    y = Rr * np.sin(omega_xy * t)
+    z = z0 + z_amp * np.sin(omega_z * t)
+    vx = -Rr * omega_xy * np.sin(omega_xy * t)
+    vy =  Rr * omega_xy * np.cos(omega_xy * t)
+    vz =  z_amp * omega_z * np.cos(omega_z * t)
+    return t, np.vstack([x,y,z]).T, np.vstack([vx,vy,vz]).T
+
+# -------- NEW 3: spiral (slowly expanding circle in XY) --------
+def make_traj_spiral(T, dt, rng):
+    R0 = rng.uniform(0.2, 0.35)
+    R1 = rng.uniform(0.45, 0.7)
+    z0 = rng.uniform(-0.05, 0.05)
+    omega = (2*np.pi/18.0) * rng.uniform(0.8, 1.2)
+    t = np.arange(0, T, dt)
+    k = (R1 - R0) / max(T, 1e-6)   # radial growth rate
+    R_t = R0 + k * t
+    x = R_t * np.cos(omega * t)
+    y = R_t * np.sin(omega * t)
+    z = z0 * np.ones_like(t)
+    # analytic velocities: r' = k
+    vx = k * np.cos(omega * t) - R_t * omega * np.sin(omega * t)
+    vy = k * np.sin(omega * t) + R_t * omega * np.cos(omega * t)
+    vz = np.zeros_like(t)
+    return t, np.vstack([x,y,z]).T, np.vstack([vx,vy,vz]).T
+
 TRAJ_FACTORY = {
     "hover":     make_traj_hover,
     "figure8":   make_traj_figure8,
     "circle":    make_traj_circle,
     "lissajous": make_traj_lissajous,
+    "ellipse":   make_traj_ellipse,   # NEW
+    "helix":     make_traj_helix,     # NEW
+    "spiral":    make_traj_spiral,    # NEW
 }
 
 def get_error_state(quad, x, xg):
@@ -123,6 +176,8 @@ def make_estimator(name: str, theta0: np.ndarray, window: int):
         return REK(num_params=n, x0=theta0)
     if name == "deka":
         return DEKA(num_params=n, x0=theta0)
+    if name == "fdbk":
+        return FDBK(num_params=n, x0=theta0)
     if name in ("gt", "none"):
         return None
     raise ValueError(f"Unknown estimator: {name}")
@@ -156,11 +211,11 @@ def run_single_trial(estimator_name: str, base_seed: int, trial_idx: int,
     x_true[3:7]   = quad.rptoq(0.02*rng.standard_normal(3))
     x_true[7:10]  = vel_ref[0] + 0.01*rng.standard_normal(3)
     x_true[10:13] = 0.01*rng.standard_normal(3)
-    x_meas = apply_noise(x_true)
+    x_meas = x_true.copy()
 
     # Randomized events
     add_step  = rng.integers(200, 301)
-    drop_step = rng.integers(500, 701)
+    drop_step = rng.integers(600, 701)
     payload_m  = rng.uniform(0.01, 0.02)
     payload_dr = rng.uniform(-0.002, 0.002, size=3)
 
@@ -189,12 +244,15 @@ def run_single_trial(estimator_name: str, base_seed: int, trial_idx: int,
 
         # propagate + measure
         x_true_next = quad.dynamics_rk4_true(x_true, u, dt=dt)
-        x_meas_next = apply_noise(x_true_next)
+        x_meas_next = x_true_next.copy() #apply_noise(x_true_next)
 
         # residual row-block
         dx_meas = (x_meas_next - x_meas) / dt
         A_mat = quad.get_data_matrix(x_meas, dx_meas)         # (6,10)
-        b_vec = quad.get_force_vector(x_meas, dx_meas, u)     # (6,)
+        b_vec = quad.get_force_vector_from_A(A_mat)
+        noise_std = np.linalg.norm(b_vec) * 0.05
+        b_vec += noise_std * rng.standard_normal(b_vec.shape)
+        # b_vec = quad.get_force_vector(x_meas, dx_meas, u)     # (6,)
         A_buf.append(A_mat); B_buf.append(b_vec)
 
         # update (skip t=0)

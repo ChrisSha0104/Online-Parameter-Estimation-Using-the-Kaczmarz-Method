@@ -78,7 +78,7 @@ class RK:
         row_norms_sq = (A * A).sum(axis=1) + eps
         probs = row_norms_sq / row_norms_sq.sum()
 
-        num_iter = m * n 
+        num_iter = m * n
         
         for _ in range(num_iter):
             i = np.random.choice(m, p=probs)
@@ -101,7 +101,7 @@ class TARK:
         self.num_params = num_params
         self.x0 = np.zeros(num_params) if x0 is None else np.asarray(x0).reshape(-1)
 
-    def iterate(self, A, b, burnin: int = 0, eps: float = 1e-12):
+    def iterate(self, A, b, burnin: int = 0, eps: float = 1e-12): # TODO: debug burnin steps
         A = np.asarray(A)                    # (m, n)
         b = np.asarray(b).reshape(-1)        # (m,)
         m, n = A.shape
@@ -133,59 +133,56 @@ class TARK:
 # ============================== IGRK =============================
 
 class IGRK:
-    def __init__(self, num_params, x0=None, eps=1e-12):
+    def __init__(self, num_params, x0=None):
         self.num_params = num_params
         self.x0 = np.zeros(num_params) if x0 is None else np.asarray(x0).reshape(-1)
-        self.eps = float(eps)
 
-    def iterate(self, A, b):
-        A = np.asarray(A); b = np.asarray(b).reshape(-1)
+    def iterate(self, A, b, eps=1e-12):
+        A = np.asarray(A)
+        b = np.asarray(b).reshape(-1)
         m, n = A.shape
         assert n == self.num_params
 
         x = self.x0.copy()
-        row_norm2 = (A * A).sum(axis=1)
-        pos = row_norm2[row_norm2 > self.eps]
-        floor = self.eps if pos.size == 0 else max(self.eps, 1e-6 * float(np.median(pos)))
-        row_norm2 = np.maximum(row_norm2, floor)
-        valid = row_norm2 > 10*self.eps
+        row_norms_sq = (A * A).sum(axis=1) + eps    # ||a_i||^2
         num_iter = m * n
 
         for _ in range(num_iter):
-            r = A @ x - b
-            crit = (r * r) / row_norm2
-            crit[~valid] = -np.inf
+            r = A @ x - b                           # residual
+            crit = (r * r) / row_norms_sq           # |<a_i,x>-b_i|^2 / ||a_i||^2
+            
+            # (7) N_k = { i : |<a_i,x>-b_i| != 0 }, and Γ_k = sum_{i∈N_k} ||a_i||^2
+            Nk = (np.abs(r) > 0)
+            if not Nk.any():                                 
+                # print("residual converged")
+                break
+            Gamma_k = row_norms_sq[Nk].sum()
 
-            if not np.isfinite(crit).any():
+            # thresh = 1/2 * ( max_i crit_i + ||r||^2 / Γ_k )
+            thresh = 0.5 * (crit.max() + (np.dot(r, r) / max(Gamma_k, eps)))
+
+            # Only consider valid rows (nonzero residuals & sensible norms)
+            valid = Nk & (row_norms_sq > eps)
+            Jk = np.flatnonzero(valid & (crit >= thresh))
+
+            # If empty (can happen numerically), fall back to the best valid row
+            if Jk.size == 0:
+                print("No valid rows found; using best valid row.")
                 break
 
-            Nk = np.flatnonzero(valid & (np.abs(r) > 0))
-            Gamma_k = row_norm2[Nk].sum() if Nk.size else row_norm2[valid].sum()
-            crit_valid = crit[valid]
-            if crit_valid.size == 0: break
-            thresh = 0.5 * (crit_valid.max() + (np.linalg.norm(r) ** 2) / max(Gamma_k, self.eps))
-
-            Jk = np.flatnonzero(valid & (crit >= thresh))
-            if Jk.size == 0:
-                best_local = int(np.argmax(crit_valid))
-                Jk = np.array([np.flatnonzero(valid)[best_local]])
-
+            # Sample i ∈ J_k with probabilities p_i ∝ crit_i (any prob. works; this is natural)
             weights = crit[Jk]
             if not np.isfinite(weights).any() or weights.sum() <= 0:
-                weights = np.ones(Jk.size) / Jk.size
+                print("Invalid weights")
+                break
             else:
                 weights = weights / weights.sum()
-
             i = np.random.choice(Jk, p=weights)
 
-            ai = A[i]; den = row_norm2[i]
-            ri = ai @ x - b[i]
+            ai = A[i]
+            den = row_norms_sq[i]
+            ri = r[i]
             step = (ri / den) * ai
-            # optional: clip step
-            max_step = 10.0 * (np.linalg.norm(x) + 1e-12)
-            sn = np.linalg.norm(step)
-            if sn > max_step:
-                step *= max_step / (sn + 1e-12)
 
             x = x - step
 
@@ -196,72 +193,76 @@ class IGRK:
 # ============================== MGRK =============================
 
 class MGRK:
-    def __init__(self, num_params, x0=None, alpha=1.0, beta=0.0, theta=0.5, eps=1e-12):
-        assert alpha > 0 and beta >= 0 and 0.0 <= theta <= 1.0
-        self.num_params = num_params
-        self.x0 = np.zeros(num_params) if x0 is None else np.asarray(x0).reshape(-1)
-        self.x_prev = self.x0.copy()
-        self.alpha = float(alpha)
-        self.beta = float(beta)
-        self.theta = float(theta)
-        self.eps = float(eps)
+    """
+    Improved Greedy Randomized Kaczmarz with momentum (Algorithm 2).
 
-    def iterate(self, A, b):
-        A = np.asarray(A); b = np.asarray(b).reshape(-1)
+    Args
+    ----
+    num_params : int
+    x0         : (n,) initial point; used for x^(0) = x^(1)
+    alpha      : float > 0  (relaxation/step size)
+    beta       : float >= 0 (momentum)
+    theta      : float in [0, 1] (mixes 'greedy' and 'global' thresholds)
+    """
+    def __init__(self, num_params, x0=None, alpha=1.0, beta=0.25, theta=0.5):
+        self.num_params = num_params
+        self.x0 = np.zeros(num_params) if x0 is None else np.asarray(x0, dtype=float).reshape(-1)
+        self.x_prev = self.x0.copy()     # x^(0) = x^(1)
+        self.alpha = float(alpha)
+        self.beta  = float(beta)
+        self.theta = float(theta)
+
+    def iterate(self, A, b, eps=1e-12):
+        A = np.asarray(A, dtype=float)
+        b = np.asarray(b, dtype=float).reshape(-1)
         m, n = A.shape
         assert n == self.num_params
 
-        x = self.x0.copy()
+        x      = self.x0.copy()
         x_prev = self.x_prev.copy()
+        row_norms_sq = (A * A).sum(axis=1) + eps
 
-        row_norm2 = (A * A).sum(axis=1)
-        pos = row_norm2[row_norm2 > self.eps]
-        floor = self.eps if pos.size == 0 else max(self.eps, 1e-6 * float(np.median(pos)))
-        row_norm2 = np.maximum(row_norm2, floor)
-        valid = row_norm2 > 10*self.eps
+        num_iter = m * n  # passes over the rows
 
-        num_iter = m * n
         for _ in range(num_iter):
-            r = A @ x - b
-            crit = (r * r) / row_norm2
-            crit[~valid] = -np.inf
+            r = A @ x - b                                 # residual
+            Nk = (np.abs(r) > 0)                         # Step 1: N_k
+            if not Nk.any():
+                break
+            Gamma_k = row_norms_sq[Nk].sum()             # Γ_k
 
-            if not np.isfinite(crit).any():
+            crit = (r * r) / row_norms_sq                # |<a_i,x>-b_i|^2 / ||a_i||^2
+
+            # ------- Step 2: S_k via Eq. (17) -------
+            # thresh = θ * max_i crit_i + (1-θ) * ||r||^2 / Γ_k
+            thresh = self.theta * crit.max() + (1.0 - self.theta) * (np.dot(r, r) / max(Gamma_k, eps))
+            valid = Nk & (row_norms_sq > eps)
+            Sk = np.flatnonzero(valid & (crit >= thresh))
+
+            # Fallback if empty due to numerical issues
+            if Sk.size == 0:
+                print("No valid rows found")
                 break
 
-            Nk = np.flatnonzero(valid & (np.abs(r) > 0))
-            Gamma_k = row_norm2[Nk].sum() if Nk.size else row_norm2[valid].sum()
-            crit_valid = crit[valid]
-            if crit_valid.size == 0: break
-            thresh = self.theta * crit_valid.max() + (1.0 - self.theta) * (np.linalg.norm(r) ** 2) / max(Gamma_k, self.eps)
-            Sk = np.flatnonzero(valid & (crit >= thresh))
-            if Sk.size == 0:
-                best_local = int(np.argmax(crit_valid))
-                Sk = np.array([np.flatnonzero(valid)[best_local]])
-
+            # ------- Step 3: choose i_k in S_k (prob ∝ crit) -------
             weights = crit[Sk]
-            if not np.isfinite(weights).any() or weights.sum() <= 0:
-                weights = np.ones(Sk.size) / Sk.size
-            else:
-                weights = weights / weights.sum()
+            ws = weights.sum()
+            p = (weights / ws) if np.isfinite(ws) and ws > 0 else np.ones(Sk.size) / Sk.size
+            i = np.random.choice(Sk, p=p)
 
-            i = np.random.choice(Sk, p=weights)
+            # ------- Step 4: momentum update -------
+            ai  = A[i]
+            den = row_norms_sq[i]
+            ri  = ai @ x - b[i]
 
-            ai = A[i]; den = row_norm2[i]
-            ri = ai @ x - b[i]
-            grad = (ri / den) * ai
-
-            # optional: clip grad
-            max_step = 10.0 * (np.linalg.norm(x) + 1e-12)
-            gn = np.linalg.norm(grad)
-            if gn > max_step:
-                grad *= max_step / (gn + 1e-12)
-
+            grad = (ri / den) * ai                       # Kaczmarz direction
             x_new = x - self.alpha * grad + self.beta * (x - x_prev)
+
             x_prev, x = x, x_new
 
-        self.x_prev = x_prev
-        self.x0 = x
+        # keep state for next call (x^(k+1) becomes both x0 and x_prev)
+        self.x0 = x.copy()
+        self.x_prev = x.copy()
         return x
 
 
@@ -269,49 +270,155 @@ class MGRK:
 
 class REK:
     """
-    Randomized Extended Kaczmarz with 1-D state; m*n paired (column,row) updates per call.
-    Maintains an auxiliary z ∈ R^m.
+    Randomized Extended Kaczmarz (Algorithm 3).
+
+    x^0 = 0 (or user x0), z^0 = b.
+    Each iteration:
+      - Column projection:  z ← z - <A_:j, z>/||A_:j||^2 * A_:j
+      - Row update:         x ← x + (b_i - z_i - <a_i, x>)/||a_i||^2 * a_i
+    Stop every 8 * min(m,n) iters if the two normalized tests are ≤ eps.
     """
-    def __init__(self, num_params, x0=None, eps=1e-12):
+
+    def __init__(self, num_params, x0=None):
         self.num_params = num_params
-        self.x0 = np.zeros(num_params) if x0 is None else np.asarray(x0).reshape(-1)
-        self.z = None                                # (m,) allocated lazily
-        self.eps = float(eps)
+        self.x0 = np.zeros(num_params) if x0 is None else np.asarray(x0, float).reshape(-1)
 
-    def iterate(self, A, b):
-        A = np.asarray(A)                    # (m, n)
-        b = np.asarray(b).reshape(-1)        # (m,)
+    def iterate(self, A, b, eps=1e-6, max_passes=2):
+        A = np.asarray(A, float)
+        b = np.asarray(b, float).reshape(-1)
         m, n = A.shape
-        assert n == self.num_params
+        assert n == self.num_params, "num_params must match A.shape[1]"
 
-        x = self.x0.copy()                   # (n,)
-        if self.z is None or self.z.shape[0] != m:
-            self.z = b.copy()
-        z = self.z.copy()                    # (m,)
+        # Precompute norms/probabilities
+        row_norms_sq = (A * A).sum(axis=1)
+        col_norms_sq = (A * A).sum(axis=0)
+        fro2 = row_norms_sq.sum()  # == col_norms_sq.sum()
 
-        row_norm2 = (A * A).sum(axis=1) + self.eps   # (m,)
-        col_norm2 = (A * A).sum(axis=0) + self.eps   # (n,)
-        p_rows = row_norm2 / row_norm2.sum()
-        p_cols = col_norm2 / col_norm2.sum()
+        # Guard against zero rows/cols (drop them from sampling)
+        row_probs = row_norms_sq / fro2 if fro2 > 0 else np.ones(m) / m
+        col_probs = col_norms_sq / fro2 if fro2 > 0 else np.ones(n) / n
+        row_probs = np.where(row_norms_sq > 0, row_probs, 0.0)
+        col_probs = np.where(col_norms_sq > 0, col_probs, 0.0)
+        
+        # Renormalize if needed
+        if row_probs.sum() == 0: 
+            row_probs[:] = 1.0 / m
+        else: 
+            row_probs /= row_probs.sum()
+        if col_probs.sum() == 0: 
+            col_probs[:] = 1.0 / n
+        else: 
+            col_probs /= col_probs.sum()
 
-        num_iter = m * n
-        for _ in range(num_iter):
-            # Column step: update z
-            j = np.random.choice(n, p=p_cols)
-            a_col = A[:, j]                          # (m,)
-            z = z - ((a_col @ z) / col_norm2[j]) * a_col
+        # Init
+        x = self.x0.copy()
+        z = b.copy()            # z^(0) = b
+        max_iters = max(1, int(max_passes * m))
+        check_every = max(1, 8 * min(m, n))
+        fro = np.sqrt(fro2) if fro2 > 0 else 1.0
 
-            # Row step: update x
-            i = np.random.choice(m, p=p_rows)
-            a_row = A[i]                              # (n,)
-            residual_i = b[i] - z[i] - a_row @ x
-            x = x + (residual_i / row_norm2[i]) * a_row
+        for k in range(max_iters):
+            # ---- pick column and update z (Step 6) ----
+            j = np.random.choice(n, p=col_probs)
+            aj = A[:, j]
+            den_c = col_norms_sq[j] if col_norms_sq[j] > 0 else 1.0
+            z -= (aj @ z) / den_c * aj
 
-        self.z = z
+            # ---- pick row and update x (Step 7) ----
+            i = np.random.choice(m, p=row_probs)
+            ai = A[i, :]
+            den_r = row_norms_sq[i] if row_norms_sq[i] > 0 else 1.0
+            x += (b[i] - z[i] - ai @ x) / den_r * ai
+
+            # ---- termination check (Step 8) ----
+            if (k + 1) % check_every == 0:
+                Ax = A @ x
+                xnorm = np.linalg.norm(x)
+                denom_x = max(xnorm, 1e-12)
+                primal = np.linalg.norm(Ax - (b - z)) / (fro * denom_x)
+                dual   = np.linalg.norm(A.T @ z)       / ((fro * fro) * denom_x)
+                if primal <= eps and dual <= eps:
+                    break
+
         self.x0 = x
         return x
 
+
+# ============================== FDBK ==============================
+
 import numpy as np
+
+class FDBK:
+    """
+    Fast Deterministic Block Kaczmarz (FDBK).
+
+    Update (per iter k):
+      r = b - A x_k
+      ε_k = 1/2 * ( max_i |r_i|^2 / ||a_i||^2 / ||r||^2  +  1/||A||_F^2 )
+      τ_k = { i : |r_i|^2 >= ε_k * ||r||^2 * ||a_i||^2 }
+      η_k = r masked to τ_k  (η_i = r_i if i∈τ_k else 0)
+      x_{k+1} = x_k + (η_k^T r / ||A^T η_k||^2) * A^T η_k
+
+    Args
+    ----
+    num_params : int
+    x0         : optional (n,) initial vector
+    """
+
+    def __init__(self, num_params, x0=None):
+        self.num_params = num_params
+        self.x0 = np.zeros(num_params) if x0 is None else np.asarray(x0, float).reshape(-1)
+
+    def iterate(self, A, b, tol=1e-8, eps_row=1e-12):
+        A = np.asarray(A, float)
+        b = np.asarray(b, float).reshape(-1)
+        m, n = A.shape
+        assert n == self.num_params
+
+        # Precompute norms
+        row_norms_sq = (A * A).sum(axis=1) + eps_row
+        fro_sq = (A * A).sum() + eps_row
+
+        x = self.x0.copy()
+        max_iters = m * n
+
+        for _ in range(max_iters):
+            r = b - A @ x
+            rnorm_sq = float(r @ r)
+            if rnorm_sq <= tol**2:
+                # print("converged")
+                break
+
+            # ----- (2.1) epsilon_k -----
+            crit = (r * r) / row_norms_sq                     # |r_i|^2 / ||a_i||^2
+            eps_k = 0.5 * (crit.max() / rnorm_sq + 1.0 / fro_sq)
+
+            # ----- (2.2) τ_k -----
+            # condition: |r_i|^2 >= eps_k * ||r||^2 * ||a_i||^2
+            tau_mask = (r * r) >= (eps_k * rnorm_sq * row_norms_sq)
+
+            # ensure non-empty block (very rare numerically)
+            if not tau_mask.any():
+                print("No valid rows found")
+                break
+
+            # ----- (2.3) η_k -----
+            eta = np.zeros(m, dtype=float)
+            eta[tau_mask] = r[tau_mask]                       # η_i = r_i if i in τ_k
+
+            # ----- (2.4) block update -----
+            At_eta = A.T @ eta
+            denom = float(At_eta @ At_eta)                    # ||A^T η_k||^2
+
+            alpha = float(eta @ r) / (denom + 1e-12) 
+            x = x + alpha * At_eta
+
+        self.x0 = x
+        return x
+
+
+
+# ============================== DEKA ==============================
 
 class DEKA:
     """
@@ -371,7 +478,7 @@ class DEKA:
         row_norm2 = (A * A).sum(axis=1) + self.eps       # (m,)
         fro2 = (A * A).sum() + self.eps                  # ||A||_F^2
 
-        num_iter = m * n
+        num_iter = m*n
         for _ in range(num_iter):
             r = b - A @ x                                # residual vector (m,)
             r2 = float(r @ r)                            # ||r||_2^2
