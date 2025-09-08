@@ -3,3 +3,5 @@ build/
 .venv/
 python/__pycache__/
 output/
+
+__pycache__/

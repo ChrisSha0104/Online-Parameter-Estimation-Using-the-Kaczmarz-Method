@@ -209,9 +209,61 @@ def plot_timeseries_grouped(data, outdir, algos):
 
 def plot_3d_single(data, outdir, algo=None, trial_idx=0):
     algos_all = [str(a) for a in data["algos"]]
-    algo = algo if (algo is not None) else algos_all[0]
-    if f"{algo}__xm" not in data or f"{algo}__xr" not in data:
-        raise RuntimeError("Trajectories not saved. Re-run run_trials.py with --save_traj.")
+
+    def _plot_one(ax, xr_traj, xm_traj, label, ls='-'):
+        ax.plot(xm_traj[:, 0], xm_traj[:, 1], xm_traj[:, 2], ls, label=label)
+
+    # === OVERLAY ALL ALGOS ===
+    if (algo is None) or (str(algo).lower() in ("all", "*")):
+        # collect algos that actually have trajectories saved
+        to_plot = []
+        for a in algos_all:
+            kx, kr = f"{a}__xm", f"{a}__xr"
+            if kx in data.files and kr in data.files:
+                to_plot.append(a)
+
+        if not to_plot:
+            raise RuntimeError("No algorithms have saved trajectories. Re-run with --save_traj.")
+
+        # use the first algo's reference trajectory (assumed same across algos)
+        xr_all = data[f"{to_plot[0]}__xr"]
+        if not (0 <= trial_idx < xr_all.shape[0]):
+            raise IndexError(f"trial_idx out of range for reference: 0..{xr_all.shape[0]-1}")
+        xr_traj = xr_all[trial_idx]
+
+        fig = plt.figure(figsize=(9, 7))
+        ax = fig.add_subplot(111, projection='3d')
+
+        # reference (dashed)
+        ax.plot(xr_traj[:, 0], xr_traj[:, 1], xr_traj[:, 2], 'k--', linewidth=2.0, label='Reference')
+
+        # overlay each algo
+        for a in to_plot:
+            xm = data[f"{a}__xm"]
+            if trial_idx >= xm.shape[0]:
+                print(f"[WARN] Skipping '{a}' — trial_idx {trial_idx} >= {xm.shape[0]}")
+                continue
+            xm_traj = xm[trial_idx]
+            if not np.isfinite(xm_traj).any():
+                print(f"[WARN] Skipping '{a}' — trajectory is all-NaN/inf.")
+                continue
+            ax.plot(xm_traj[:, 0], xm_traj[:, 1], xm_traj[:, 2], label=a)
+
+        ax.set_title(f'3D Tracking — ALL algos (trial {trial_idx})')
+        ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
+        ax.legend()
+        set_axes_equal_3d(ax)
+        plt.tight_layout()
+        out = outdir / f"traj3d_ALL_trial{trial_idx}.png"
+        plt.savefig(out, dpi=200)
+        plt.close()
+        print(f"Saved: {out.resolve()}")
+        return
+
+    # === SINGLE ALGO (original behavior) ===
+    algo = str(algo)
+    if f"{algo}__xm" not in data.files or f"{algo}__xr" not in data.files:
+        raise RuntimeError(f"Trajectories for '{algo}' not saved. Re-run run_trials.py with --save_traj.")
     xm = data[f"{algo}__xm"]
     xr = data[f"{algo}__xr"]
     N, T, _ = xm.shape
@@ -223,11 +275,9 @@ def plot_3d_single(data, outdir, algo=None, trial_idx=0):
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection='3d')
     ax.plot(xr_traj[:, 0], xr_traj[:, 1], xr_traj[:, 2], 'g--', label='Reference')
-    ax.plot(xm_traj[:, 0], xm_traj[:, 1], xm_traj[:, 2], 'b', label='Tracked')
+    ax.plot(xm_traj[:, 0], xm_traj[:, 1], xm_traj[:, 2], 'b', label=algo)
     ax.set_title(f'3D Tracking ({algo}, trial {trial_idx})')
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
+    ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
     ax.legend()
     set_axes_equal_3d(ax)
     plt.tight_layout()
@@ -379,7 +429,7 @@ def plot_event_error_ecdf_grouped(
 def plot_error_ecdf_fulltraj_grouped(
     data, outdir, algos,
     metrics=("pos", "vel", "ori"),
-    mode="samples",           # "samples","trial_mean","trial_median","trial_p95","trial_max"
+    mode="trial_mean",           # "samples","trial_mean","trial_median","trial_p95","trial_max"
     tmin=None,                # seconds; None = from start
     tmax=None,                # seconds; None = to end
     stride=1,                 # subsample timesteps
@@ -488,7 +538,7 @@ def main():
                     help="ECDF of errors over a fixed window after each event, split by trajectory")
     ap.add_argument("--ecdf_window_sec", type=float, default=5.0,
                     help="Window length (s) after event")
-    ap.add_argument("--ecdf_xmax", type=float, nargs="+", default=[0.02],
+    ap.add_argument("--ecdf_xmax", type=float, nargs="+", default=[0.05],
                     help="x-axis max for ECDF; one value or two values (add drop)")
     ap.add_argument("--ecdf_xmax_traj", type=str, nargs="*", default=None,
                     help="Per-traj xmax. Format 'traj:val' or 'traj:val_add,val_drop'.")
@@ -499,7 +549,7 @@ def main():
     # Full-trajectory ECDF (no events)
     ap.add_argument("--plot_ecdf", action="store_true",
                     help="ECDF of error over whole trajectory (no events), split by trajectory")
-    ap.add_argument("--ecdf_mode", type=str, default="samples",
+    ap.add_argument("--ecdf_mode", type=str, default="trial_mean",
                     choices=["samples", "trial_mean", "trial_median", "trial_p95", "trial_max"])
     ap.add_argument("--ecdf_tmin", type=float, default=None, help="Start time (s)")
     ap.add_argument("--ecdf_tmax", type=float, default=None, help="End time (s)")

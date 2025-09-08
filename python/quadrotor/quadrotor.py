@@ -137,9 +137,6 @@ class QuadrotorDynamics:
             [-self.km,           self.km,          -self.km,          self.km]
         ]) @ u
 
-        # print("J:", J)
-        # print("omg:", omg)
-        # import pdb; pdb.set_trace()  # Debugging breakpoint
         domg = inv(J) @ (
             -self.hat(omg) @ J @ omg
             + tau
@@ -208,130 +205,293 @@ class QuadrotorDynamics:
         return self.E(x_ref[3:7]).T @ A @ self.E(x_ref[3:7]), \
                self.E(x_ref[3:7]).T @ B
 
-    def get_force_vector(self, x_curr: np.ndarray,
-                            dx:     np.ndarray,
-                            u_curr: np.ndarray) -> np.ndarray:
-        """
-        Build the 6×1 force/torque vector b = [F; τ] such that A·θ = b
-        with θ = [m, m x_c, m y_c, m z_c, Ixx, Iyy, Izz, Ixy, Ixz, Iyz].
+    # def get_force_vector(self, x_curr: np.ndarray,
+    #                         dx:     np.ndarray,
+    #                         u_curr: np.ndarray) -> np.ndarray:
+    #     """
+    #     Build the 6×1 force/torque vector b = [F; τ] such that A·θ = b
+    #     with θ = [m, m x_c, m y_c, m z_c, Ixx, Iyy, Izz, Ixy, Ixz, Iyz].
 
-        Args:
-        x_curr: state (12,) = [r, q, v, ω]
-        dx:     state derivative (12,) = [v, q̇, a, α]
-        u_curr: motor inputs (4,)
+    #     Args:
+    #     x_curr: state (12,) = [r, q, v, ω]
+    #     dx:     state derivative (12,) = [v, q̇, a, α]
+    #     u_curr: motor inputs (4,)
 
-        Returns:
-        b: (6,) = [F_world; τ_body]
-        """
-        # normalize quaternion & build rotation
-        q = x_curr[3:7]
-        q = q / np.linalg.norm(q)
-        R = self.qtoQ(q)            # body → world
+    #     Returns:
+    #     b: (6,) = [F_world; τ_body]
+    #     """
+    #     # normalize quaternion & build rotation
+    #     q = x_curr[3:7]
+    #     q = q / np.linalg.norm(q)
+    #     R = self.qtoQ(q)            # body → world
 
-        # physical constants
-        m   = self._mass_true
-        r_c = self._r_off_true      # COM offset in body frame
-        c   = m * r_c               # first moment vector
+    #     # physical constants
+    #     m   = self._mass_true
+    #     r_c = self._r_off_true      # COM offset in body frame
+    #     c   = m * r_c               # first moment vector
 
-        # 1) THRUST in body & world
-        F_b = np.array([0.0, 0.0, np.sum(u_curr) * self.kt])  # total thrust in body-z
-        F_w = R @ F_b                                        # rotate to world
-        F_w[2] -= m * self.g                                 # subtract weight
+    #     # 1) THRUST in body & world
+    #     F_b = np.array([0.0, 0.0, np.sum(u_curr) * self.kt])  # total thrust in body-z
+    #     F_w = R @ F_b                                        # rotate to world
+    #     F_w[2] -= m * self.g                                 # subtract weight
 
-        # 2) TRANSLATIONAL COM‐COUPLING
-        ω     = x_curr[10:13]        # body‐frame angular vel
-        α     = dx[10:13]            # body‐frame angular accel
-        # dv_c in body: ω×(ω×r_c) + r_c×α
-        dv_c_b = np.cross(ω, np.cross(ω, r_c)) + np.cross(r_c, α)
-        dv_c_w = R @ dv_c_b          # into world frame
-        F_coup = m * dv_c_w          # mass × coupling accel
+    #     # 2) TRANSLATIONAL COM‐COUPLING
+    #     ω     = x_curr[10:13]        # body‐frame angular vel
+    #     α     = dx[10:13]            # body‐frame angular accel
+    #     # dv_c in body: ω×(ω×r_c) + r_c×α
+    #     dv_c_b = np.cross(ω, np.cross(ω, r_c)) + np.cross(r_c, α)
+    #     dv_c_w = R @ dv_c_b          # into world frame
+    #     F_coup = m * dv_c_w          # mass × coupling accel
 
-        # total force (world)
-        b_trans = F_w + F_coup       # = m*(dv_base + dv_c)
+    #     # total force (world)
+    #     b_trans = F_w + F_coup       # = m*(dv_base + dv_c)
 
-        # 3) MOTOR TORQUES (body)
-        tau_motors = np.array([
-            [-self.el*self.kt, -self.el*self.kt,  self.el*self.kt,  self.el*self.kt],
-            [-self.el*self.kt,  self.el*self.kt,  self.el*self.kt, -self.el*self.kt],
-            [-self.km,           self.km,          -self.km,          self.km]
-        ]) @ u_curr
+    #     # 3) MOTOR TORQUES (body)
+    #     tau_motors = np.array([
+    #         [-self.el*self.kt, -self.el*self.kt,  self.el*self.kt,  self.el*self.kt],
+    #         [-self.el*self.kt,  self.el*self.kt,  self.el*self.kt, -self.el*self.kt],
+    #         [-self.km,           self.km,          -self.km,          self.km]
+    #     ]) @ u_curr
 
-        # 4) ROTATIONAL COM‐COUPLING TORQUE
-        # dv_base in body = F_b/m + Rᵀ [0,0,−g]
-        dv_base_b = F_b/m + R.T @ np.array([0.0, 0.0, -self.g])
-        tau_coup  = - np.cross(c, dv_base_b)
+    #     # 4) ROTATIONAL COM‐COUPLING TORQUE
+    #     # dv_base in body = F_b/m + Rᵀ [0,0,−g]
+    #     dv_base_b = F_b/m + R.T @ np.array([0.0, 0.0, -self.g])
+    #     tau_coup  = - np.cross(c, dv_base_b)
 
-        b_rot = tau_motors + tau_coup
+    #     b_rot = tau_motors + tau_coup
 
-        # stack into a flat 6-vector
-        return np.hstack([b_trans, b_rot])
+    #     # stack into a flat 6-vector
+    #     return np.hstack([b_trans, b_rot])
     
-    def get_force_vector_from_A(self, A_mat):
-        b = A_mat @ self.get_true_inertial_params()
-        return b.reshape(-1)
+    # def get_force_vector_from_A(self, A_mat):
+    #     b = A_mat @ self.get_true_inertial_params()
+    #     return b.reshape(-1)
 
-    def get_data_matrix(self, x, dx):
+    # def get_data_matrix(self, x, dx):
+    #     """
+    #     Build the 6x10 data matrix A so that A @ theta = b, where
+    #     theta = [m, m*x_c, m*y_c, m*z_c, Ixx, Iyy, Izz, Ixy, Ixz, Iyz].
+
+    #     Exact equality holds with `get_force_vector` provided both are
+    #     called on the same (x, dx, u) and you put *all* COM torque terms
+    #     in b (as your get_force_vector does via tau_coup).
+    #     """
+    #     # ---- unpack state/derivatives ----
+    #     q = x[3:7] / np.linalg.norm(x[3:7])
+    #     # R not needed here (A uses world a and body alpha/omega)
+    #     a_world = dx[7:10]           # world translational acceleration
+    #     omega   = x[10:13]           # body angular velocity
+    #     alpha   = dx[10:13]          # body angular acceleration
+
+    #     wx, wy, wz = omega
+    #     ax, ay, az = alpha
+
+    #     # ---- A matrix ----
+    #     A = np.zeros((6, 10))
+
+    #     # (1) Translational:   m * a_world  == b_trans
+    #     A[0, 0] = a_world[0]  # mass column
+    #     A[1, 0] = a_world[1]
+    #     A[2, 0] = a_world[2]
+
+    #     # (2) Rotational:  J*alpha + omega x (J*omega)  == b_rot  (in body frame)
+    #     # Columns 4..9 correspond to [Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
+    #     # 2a) J * alpha part (linear in inertia)
+    #     M_alpha = np.array([
+    #         [ax, 0.0, 0.0, ay, az, 0.0],   # tau_x
+    #         [0.0, ay, 0.0, ax, 0.0, az],   # tau_y
+    #         [0.0, 0.0, az, 0.0, ax, ay],   # tau_z
+    #     ])
+
+    #     # 2b) Gyro part: omega x (J*omega)
+    #     # Do it generically via basis actions E_k * omega for each inertia element.
+    #     e_Ixx = np.array([wx, 0.0, 0.0])
+    #     e_Iyy = np.array([0.0, wy, 0.0])
+    #     e_Izz = np.array([0.0, 0.0, wz])
+    #     e_Ixy = np.array([wy, wx, 0.0])    # because J_xy = J_yx
+    #     e_Ixz = np.array([wz, 0.0, wx])    # because J_xz = J_zx
+    #     e_Iyz = np.array([0.0, wz, wy])    # because J_yz = J_zy
+
+    #     def cross_w(v):
+    #         # return omega x v
+    #         return np.array([wy*v[2] - wz*v[1],
+    #                         wz*v[0] - wx*v[2],
+    #                         wx*v[1] - wy*v[0]])
+
+    #     M_gyro = np.column_stack([
+    #         cross_w(e_Ixx),  # column for Ixx
+    #         cross_w(e_Iyy),  # column for Iyy
+    #         cross_w(e_Izz),  # column for Izz
+    #         cross_w(e_Ixy),  # column for Ixy
+    #         cross_w(e_Ixz),  # column for Ixz
+    #         cross_w(e_Iyz),  # column for Iyz
+    #     ])
+
+    #     # Fill rotational block; note: columns 1..3 (first moments) are ZERO here,
+    #     # because COM torque terms (-c x a_base_b) are accounted for in b, not in A.
+    #     A[3:6, 4:10] = M_alpha + M_gyro
+
+    #     return A
+
+    def get_force_vector(self,
+                        x_curr: np.ndarray,
+                        dx:     np.ndarray,
+                        u_curr: np.ndarray | None = None) -> np.ndarray:
         """
-        Build the 6x10 data matrix A so that A @ theta = b, where
-        theta = [m, m*x_c, m*y_c, m*z_c, Ixx, Iyy, Izz, Ixy, Ixz, Iyz].
+        Build the 6×1 wrench vector b = [f_b; n_b] (both in BODY frame) so that
 
-        Exact equality holds with `get_force_vector` provided both are
-        called on the same (x, dx, u) and you put *all* COM torque terms
-        in b (as your get_force_vector does via tau_coup).
+            b  =  A(x, dx) @ theta
+
+        with theta = [m, mcx, mcy, mcz, Ixx, Iyy, Izz, Ixy, Ixz, Iyz]^T.
+
+        Notes
+        -----
+        • This b EXCLUDES actuator (motor) thrust/torque; it is purely
+        gravito-inertial (Newton–Euler) terms. That matches get_data_matrix().
+        • If you need to include actuators, compute them separately and add to b
+        *outside* A@theta (they don't depend on inertial parameters).
         """
-        # ---- unpack state/derivatives ----
-        q = x[3:7] / np.linalg.norm(x[3:7])
-        # R not needed here (A uses world a and body alpha/omega)
-        a_world = dx[7:10]           # world translational acceleration
-        omega   = x[10:13]           # body angular velocity
-        alpha   = dx[10:13]          # body angular acceleration
 
+        # ---------- frames & signals ----------
+        # q: body->world rotation; Rwb is body->world, Rbw is world->body
+        q   = x_curr[3:7] / np.linalg.norm(x_curr[3:7])
+        Rwb = self.qtoQ(q)
+        Rbw = Rwb.T
+
+        # world linear acceleration of the sensor origin -> body
+        a_w = dx[7:10]
+        a_b = Rbw @ a_w
+
+        # gravity in body frame
+        g_b = Rbw @ np.array([0.0, 0.0, -self.g])
+
+        # body angular velocity / acceleration
+        omega = x_curr[10:13]
+        alpha = dx[10:13]
         wx, wy, wz = omega
         ax, ay, az = alpha
 
-        # ---- A matrix ----
-        A = np.zeros((6, 10))
+        # ---------- true inertial params (for b using ground-truth) ----------
+        m  = self._mass_true
+        c  = m * self._r_off_true        # first moment (body frame)
+        J  = self._J_true
 
-        # (1) Translational:   m * a_world  == b_trans
-        A[0, 0] = a_world[0]  # mass column
-        A[1, 0] = a_world[1]
-        A[2, 0] = a_world[2]
+        # ---------- force (BODY) ----------
+        # f_b = m (a_b - g_b) + [ω×(ω×c) + α×c]
+        delta_a_b = a_b - g_b
+        f_coup    = np.cross(omega, np.cross(omega, c)) + np.cross(alpha, c)
+        f_b       = m * delta_a_b + f_coup
 
-        # (2) Rotational:  J*alpha + omega x (J*omega)  == b_rot  (in body frame)
-        # Columns 4..9 correspond to [Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
-        # 2a) J * alpha part (linear in inertia)
+        # ---------- torque (BODY) ----------
+        # n_b = J α + ω×(J ω) + c × [ m (a_b - g_b) ]
+        n_b = J @ alpha + np.cross(omega, J @ omega) + np.cross(c, m * delta_a_b)
+
+        # stack as 6-vector in BODY frame
+        return np.hstack([f_b, n_b])
+    
+    def get_data_matrix(self, x: np.ndarray, dx: np.ndarray) -> np.ndarray:
+        """
+        Build the 6×10 data matrix A so that A @ theta = w, with
+            theta = [ m, mcx, mcy, mcz, Ixx, Iyy, Izz, Ixy, Ixz, Iyz ].
+        This matches the expanded S_A form in your screenshot (forces & torques
+        expressed in the BODY / sensor frame).
+
+        State layout:
+        x  = [ r(0:3) , q(3:7) , v(7:10) , omega(10:13) ]
+        dx = [  ...   ,  ...   , a_world(7:10) , alpha_body(10:13) ]
+
+        Frames:
+        - a_world is converted to body; gravity is rotated to body; all
+            omega/alpha are already body-frame.
+        """
+        # ---- unpack & frame transforms ----
+        q = x[3:7] / np.linalg.norm(x[3:7])   # unit quaternion body->world
+        Rwb = self.qtoQ(q)                    # body->world
+        Rbw = Rwb.T                           # world->body
+
+        a_w = dx[7:10]                        # world linear accel of sensor origin
+        a_b = Rbw @ a_w                       # to body
+        g_b = Rbw @ np.array([0.0, 0.0, -self.g])
+
+        # shorthand
+        ax_b, ay_b, az_b = a_b
+        gx_b, gy_b, gz_b = g_b
+
+        # omega, alpha in body
+        wx, wy, wz = x[10:13]
+        ax, ay, az = dx[10:13]                # angular acceleration (αx, αy, αz)
+
+        # frequently used combos (from expanding ω×(ω×c)+α×c)
+        # These are exactly the coefficients that multiply [mcx, mcy, mcz] in the FORCE rows.
+        f11, f12, f13 = (-wy**2 - wz**2), (wx*wy - az), (wx*wz + ay)
+        f21, f22, f23 = (wx*wy + az), (-wx**2 - wz**2), (wy*wz - ax)
+        f31, f32, f33 = (wx*wz - ay), (wy*wz + ax), (-wx**2 - wy**2)
+
+        # delta a (a - g) in body, used in both force (mass column) and torque (skew) blocks
+        dax, day, daz = ax_b - gx_b, ay_b - gy_b, az_b - gz_b
+
+        # ---- rotational inertia block: J α + ω × (J ω) ----
+        # Columns (Ixx, Iyy, Izz, Ixy, Ixz, Iyz) appear linearly in both parts.
+        # M_alpha encodes the J α part; M_gyro encodes ω×(Jω) part via basis actions.
         M_alpha = np.array([
-            [ax, 0.0, 0.0, ay, az, 0.0],   # tau_x
-            [0.0, ay, 0.0, ax, 0.0, az],   # tau_y
-            [0.0, 0.0, az, 0.0, ax, ay],   # tau_z
+            [ax, 0.0, 0.0, ay, az, 0.0],   # τx
+            [0.0, ay, 0.0, ax, 0.0, az],   # τy
+            [0.0, 0.0, az, 0.0, ax, ay],   # τz
         ])
 
-        # 2b) Gyro part: omega x (J*omega)
-        # Do it generically via basis actions E_k * omega for each inertia element.
+        def cross_w(v):
+            return np.array([ wy*v[2] - wz*v[1],
+                            wz*v[0] - wx*v[2],
+                            wx*v[1] - wy*v[0] ])
+
         e_Ixx = np.array([wx, 0.0, 0.0])
         e_Iyy = np.array([0.0, wy, 0.0])
         e_Izz = np.array([0.0, 0.0, wz])
-        e_Ixy = np.array([wy, wx, 0.0])    # because J_xy = J_yx
-        e_Ixz = np.array([wz, 0.0, wx])    # because J_xz = J_zx
-        e_Iyz = np.array([0.0, wz, wy])    # because J_yz = J_zy
-
-        def cross_w(v):
-            # return omega x v
-            return np.array([wy*v[2] - wz*v[1],
-                            wz*v[0] - wx*v[2],
-                            wx*v[1] - wy*v[0]])
+        e_Ixy = np.array([wy, wx, 0.0])     # J_xy = J_yx
+        e_Ixz = np.array([wz, 0.0, wx])     # J_xz = J_zx
+        e_Iyz = np.array([0.0, wz, wy])     # J_yz = J_zy
 
         M_gyro = np.column_stack([
-            cross_w(e_Ixx),  # column for Ixx
-            cross_w(e_Iyy),  # column for Iyy
-            cross_w(e_Izz),  # column for Izz
-            cross_w(e_Ixy),  # column for Ixy
-            cross_w(e_Ixz),  # column for Ixz
-            cross_w(e_Iyz),  # column for Iyz
+            cross_w(e_Ixx),
+            cross_w(e_Iyy),
+            cross_w(e_Izz),
+            cross_w(e_Ixy),
+            cross_w(e_Ixz),
+            cross_w(e_Iyz),
         ])
 
-        # Fill rotational block; note: columns 1..3 (first moments) are ZERO here,
-        # because COM torque terms (-c x a_base_b) are accounted for in b, not in A.
+        # ---- assemble A (6×10) ----
+        A = np.zeros((6, 10))
+
+        # FORCE rows (body frame):
+        #   f = m (a - g) + [ω×(ω×c) + α×c]
+        #   -> mass column gets (a - g)
+        #   -> first-moment columns get the expanded coefficients (f_ij above)
+        A[0, 0] = dax
+        A[1, 0] = day
+        A[2, 0] = daz
+
+        A[0, 1:4] = np.array([f11, f12, f13])   # multiplies [mcx, mcy, mcz]
+        A[1, 1:4] = np.array([f21, f22, f23])
+        A[2, 1:4] = np.array([f31, f32, f33])
+
+        # No inertia contribution in the force rows:
+        # A[0:3, 4:10] remain zero.
+
+        # TORQUE rows (body frame):
+        #   n = J α + ω×(J ω) + c × [ m (a - g) ]
+        # The c×(...) contribution → coefficients for [mcx,mcy,mcz] is skew(a - g).
+        # skew(v) = [[ 0, -vz,  vy],
+        #            [ vz,  0, -vx],
+        #            [-vy, vx,   0]]
+        # Here v = (a - g) = (dax, day, daz).
+        A[3:6, 1:4] = np.array([
+            [ 0.0,   gz_b - az_b,  gy_b - ay_b],   # = [0, -daz, -day]
+            [ az_b - gz_b,  0.0,   gx_b - ax_b],   # = [daz, 0, -dax]
+            [ ay_b - gy_b,  ax_b - gx_b,  0.0],    # = [day, dax, 0]
+        ])
+
+        # Inertia contribution
         A[3:6, 4:10] = M_alpha + M_gyro
 
         return A

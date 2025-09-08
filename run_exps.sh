@@ -1,10 +1,19 @@
-# python python/run_payload_trials_parallel.py \
-#     --outdir output/20250902_all_algs_freq10_wind1 --ntrials 100 --est_freq 10
+python python/run_payload_trials_parallel.py \
+    --outdir output/20250907_new_Ab_gated_noise_low_freq_50 --ntrials 100 --est_freq 50  --noise low --save_traj
+
+python python/run_payload_trials_parallel.py \
+    --outdir output/20250907_new_Ab_gated_noise_medium_freq_50 --ntrials 100 --est_freq 50  --noise medium --save_traj
+
+python python/run_payload_trials_parallel.py \
+    --outdir output/20250907_new_Ab_gated_noise_high_freq_50 --ntrials 100 --est_freq 50  --noise high --save_traj
 
 
 
 python python/run_payload_trials_parallel.py \
-    --outdir output/20250903_all_algs_freq100_wind1 --ntrials 100 --est_freq 100
+    --outdir output/20250907_new_Ab_gated_noise_medium_freq_5 --ntrials 100 --est_freq 5  --noise medium --save_traj
 
 python python/run_payload_trials_parallel.py \
-    --outdir output/20250903_all_algs_freq40_wind1 --ntrials 100 --est_freq 40
+    --outdir output/20250907_new_Ab_gated_noise_medium_freq_10 --ntrials 100 --est_freq 10  --noise medium --save_traj
+
+python python/run_payload_trials_parallel.py \
+    --outdir output/20250907_new_Ab_gated_noise_medium_freq_100 --ntrials 100 --est_freq 100  --noise medium --save_traj
