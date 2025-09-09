@@ -516,6 +516,80 @@ def plot_error_ecdf_fulltraj_grouped(
         print(f"Saved: {out.resolve()}")
 
 
+def plot_error_ecdf_fulltraj_allcombined(
+    data, outdir, algos,
+    metrics=("pos", "vel", "ori"),
+    mode="trial_mean",      # "samples","trial_mean","trial_median","trial_p95","trial_max"
+    tmin=None, tmax=None,
+    stride=1,
+    xlog=False,
+    xmax_per_metric=None,   # e.g., {"pos":0.03,"vel":0.15,"ori":2.0}
+):
+    t = data["t"]
+    T = len(t)
+    dt = float(t[1] - t[0]) if len(t) > 1 else 0.01
+
+    # time window → indices
+    k0 = 0 if tmin is None else max(0, int(np.floor(tmin / dt)))
+    k1 = T if tmax is None else min(T, int(np.ceil(tmax / dt)))
+    if k1 <= k0: k0, k1 = 0, T
+
+    def reduce_trial(arr_2d):
+        # arr_2d: (N_trials, K)
+        if mode == "samples":
+            return arr_2d[:, ::stride].ravel()
+        if mode == "trial_mean":
+            return np.nanmean(arr_2d[:, ::stride], axis=1)
+        if mode == "trial_median":
+            return np.nanmedian(arr_2d[:, ::stride], axis=1)
+        if mode == "trial_p95":
+            return np.nanpercentile(arr_2d[:, ::stride], 95, axis=1)
+        if mode == "trial_max":
+            return np.nanmax(arr_2d[:, ::stride], axis=1)
+        raise ValueError(f"Unknown mode: {mode}")
+
+    titles = {"pos": "Position error [m]", "vel": "Velocity error [m/s]", "ori": "Orientation error [deg]"}
+    label_mode = {
+        "samples": "(all samples)",
+        "trial_mean": "(per-trial mean)",
+        "trial_median": "(per-trial median)",
+        "trial_p95": "(per-trial p95)",
+        "trial_max": "(per-trial max)",
+    }[mode]
+    win_txt = f"[{t[k0]:.2f}s, {t[min(k1, T)-1]:.2f}s]"
+
+    for metric in metrics:
+        fig, ax = plt.subplots(figsize=(7, 5))
+        for algo in algos:
+            key = f"{algo}__{metric}"
+            if key not in data.files:
+                continue
+            E_all = data[key]               # shape: (N_trials_total, T)
+            vals = reduce_trial(E_all[:, k0:k1])
+            vals = vals[np.isfinite(vals)]
+            if vals.size == 0:
+                continue
+            xs = np.sort(vals)
+            ys = np.arange(1, xs.size + 1) / xs.size
+            ax.plot(xs, ys, label=f"{algo} (N={vals.size if mode!='samples' else 'samples'})")
+
+        ax.set_xlabel(titles[metric])
+        ax.set_ylabel("Fraction of trials" if mode != "samples" else "Fraction of samples")
+        ax.set_title(f"{metric.upper()} — ALL trajectories combined\n{label_mode}  window={win_txt}, stride={stride}")
+        ax.grid(True, which="both")
+        if xlog:
+            ax.set_xscale("log")
+        if xmax_per_metric and metric in xmax_per_metric:
+            ax.set_xlim(left=0, right=float(xmax_per_metric[metric]))
+        ax.legend()
+
+        fig.tight_layout()
+        out = outdir / f"error_ecdf_fulltraj_ALLTRAJ_{_sanitize(metric)}_{mode}_t{tmin if tmin is not None else 0}-{tmax if tmax is not None else int(t[-1])}_s{stride}.png"
+        fig.savefig(out, dpi=200)
+        plt.close(fig)
+        print(f"Saved: {out.resolve()}")
+
+
 # ============================ main ============================
 
 def main():
@@ -561,6 +635,10 @@ def main():
     ap.add_argument("--ecdf_full_xmax_traj", type=str, nargs="*", default=None,
                     help="Per-traj xmax for full-trajectory ECDF. Format 'traj:val'.")
 
+    ap.add_argument("--plot_ecdf_all", action="store_true",
+                help="ECDF over the whole trajectory, aggregating ALL trajectory types into a single plot")
+
+
     args = ap.parse_args()
 
     # IO
@@ -603,6 +681,24 @@ def main():
             xmax=xmax_param,
             stat=args.ecdf_stat,
             xmax_by_traj=xmax_traj_map_event,
+        )
+    if args.plot_ecdf_all:
+        xmax_per_metric = {}
+        if args.ecdf_xmax_pos is not None: xmax_per_metric["pos"] = args.ecdf_xmax_pos
+        if args.ecdf_xmax_vel is not None: xmax_per_metric["vel"] = args.ecdf_xmax_vel
+        if args.ecdf_xmax_ori is not None: xmax_per_metric["ori"] = args.ecdf_xmax_ori
+        if not xmax_per_metric:
+            xmax_per_metric = {"pos": 0.03, "vel": 0.15, "ori": 2.0}
+
+        plot_error_ecdf_fulltraj_allcombined(
+            data, outdir, algos=sel_algos,
+            metrics=("pos", "vel", "ori"),
+            mode=args.ecdf_mode,
+            tmin=args.ecdf_tmin,
+            tmax=args.ecdf_tmax,
+            stride=max(1, int(args.ecdf_stride)),
+            xlog=args.ecdf_xlog,
+            xmax_per_metric=xmax_per_metric,
         )
 
     if args.plot_ecdf:

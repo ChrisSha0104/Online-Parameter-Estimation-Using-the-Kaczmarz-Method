@@ -78,9 +78,9 @@ def gate_param_update(theta, A, b, rel_resid_max=0.25, verbose=False):
     J = np.array([[Ixx,Ixy,Ixz],[Ixy,Iyy,Iyz],[Ixz,Iyz,Izz]])
     # SPD + magnitude clamp (tune)
     w = np.linalg.eigvalsh(0.5*(J+J.T))
-    if (w < 1e-7).any() or (w > 1e-3).any(): # TODO: change lower to 1e-5
+    if (w < 1e-7).any() or (w > 1e-4).any(): # TODO: change lower to 1e-5
         if verbose:
-            print(f"Reject: inertia matrix eigenvalues {w} out of bounds [1e-7, 1e-3]")
+            print(f"Reject: inertia matrix eigenvalues {w} out of bounds [1e-7, 1e-4]")
         return False
 
     # numerics
@@ -437,7 +437,7 @@ def run_single_trial(
                         print(f"[EST] theta_gt = {theta_gt}")
                         print(f"[EST] theta_est= {theta_est}")
                         print(f"[EST] udpate controller = {gate_param_update(theta_est, A_stack, b_stack)}")
-                        print(f"[EST] cond(A) = {np.linalg.cond(A_stack):.4e}")
+                        print(f"[EST] scaled cond(A) = {scaled_cond(A_stack):.4e}")
 
                     est_err_traj.append(rel_residual(A_stack, theta_est, b_stack))
                     theta_est_cur = theta_est.copy()
@@ -528,7 +528,12 @@ def run_single_trial(
         "abort_step": np.array([abort_step]),
     }
 
-
+def scaled_cond(A):
+    """Scaled condition number kappa(A) = ||A||_F * ||A^{-1}||_2."""
+    A = np.asarray(A, float)
+    frob_norm = np.linalg.norm(A, 'fro')          # Frobenius norm
+    inv_2norm = np.linalg.norm(np.linalg.inv(A), 2)  # spectral norm of A^{-1}
+    return frob_norm * inv_2norm
 # --------------------------- worker wrapper ---------------------------
 
 def _trial_worker(
@@ -572,7 +577,7 @@ def main():
     ap.add_argument("--est_freq", type=int, default=50)
     ap.add_argument("--window", type=int, default=1)
     ap.add_argument("--save_traj", action="store_true")
-    ap.add_argument("--workers", type=int, default=8,
+    ap.add_argument("--workers", type=int, default=16,
                     help="If >0, use ProcessPoolExecutor with this many workers.")
 
     args = ap.parse_args()

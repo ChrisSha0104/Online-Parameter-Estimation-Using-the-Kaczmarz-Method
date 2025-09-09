@@ -18,7 +18,7 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Literal, Tuple
-
+import traceback
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
@@ -53,7 +53,7 @@ def closest_spd(theta: np.ndarray, epsilon: float = 1e-6) -> np.ndarray:
     Ixy_spd, Ixz_spd, Iyz_spd = A_spd[0, 1], A_spd[0, 2], A_spd[1, 2]
     return np.array([m, cx, cy, cz, Ixx_spd, Iyy_spd, Izz_spd, Ixy_spd, Ixz_spd, Iyz_spd])
 
-def gate_param_update(theta, A, b, rel_resid_max=0.25, condA_max=1e5, verbose=True):
+def gate_param_update(theta, A, b, rel_resid_max=0.25, verbose=False):
     m,cx,cy,cz,Ixx,Iyy,Izz,Ixy,Ixz,Iyz = theta
     # import pdb; pdb.set_trace()
 
@@ -62,25 +62,20 @@ def gate_param_update(theta, A, b, rel_resid_max=0.25, condA_max=1e5, verbose=Tr
         if verbose:
             print(f"Reject: mass {m:.4f} out of bounds [0.02, 0.08]")
         return False
-    # print("gt m", m)
     if np.linalg.norm([cx,cy,cz]) > 0.02: 
         if verbose:
             print(f"Reject: center of mass [{cx:.4f}, {cy:.4f}, {cz:.4f}] out of bounds [-0.02, 0.02]")
         return False
-    # print("gt c", cx, cy, cz)
     J = np.array([[Ixx,Ixy,Ixz],[Ixy,Iyy,Iyz],[Ixz,Iyz,Izz]])
     # SPD + magnitude clamp (tune)
     w = np.linalg.eigvalsh(0.5*(J+J.T))
-
-    # print("gt w", w)
-    if (w < 1e-6).any() or (w > 1e-4).any(): 
+    if (w < 1e-7).any() or (w > 1e-4).any(): # TODO: change lower to 1e-5
         if verbose:
             print(f"Reject: inertia matrix eigenvalues {w} out of bounds [1e-7, 1e-4]")
         return False
 
     # numerics
     rel = np.linalg.norm(A@theta - b) / max(np.linalg.norm(b), 1e-12)
-    # print("gt rel", rel)
     if rel > rel_resid_max: 
         if verbose:
             print(f"Reject: relative residual {rel:.4f} > {rel_resid_max}")
@@ -115,12 +110,20 @@ def make_estimator(name: str, theta0: np.ndarray, window: int):
     n = int(theta0.shape[0])
     name = name.lower()
 
-    if name == "rls":
-        return RLS(num_params=n, theta_hat=theta0, forgetting_factor=0.7, c=10)
-    if name == "kf":
+    if name == "rls_0.8":
+        return RLS(num_params=n, theta_hat=theta0, forgetting_factor=0.8, c=1000)
+    if name == "rls_0.5":
+        return RLS(num_params=n, theta_hat=theta0, forgetting_factor=0.5, c=1000)
+    if name == "rls_0.2":
+        return RLS(num_params=n, theta_hat=theta0, forgetting_factor=0.2, c=1000)
+    if name == "kf_low":
         Q = 1e-3 * np.eye(n)
         Rm = 1e-4 * np.eye(window * 6)
-        return KF(num_params=n, process_noise=Q, measurement_noise=Rm, theta_hat=theta0, c=10)
+        return KF(num_params=n, process_noise=Q, measurement_noise=Rm, theta_hat=theta0, c=1000)
+    if name == "kf_high":
+        Q = 1e-2 * np.eye(n)
+        Rm = 1e-3 * np.eye(window * 6)
+        return KF(num_params=n, process_noise=Q, measurement_noise=Rm, theta_hat=theta0, c=1000)
     if name == "rk":
         return RK(num_params=n, x0=theta0)
     if name == "tark":
@@ -137,18 +140,23 @@ def make_estimator(name: str, theta0: np.ndarray, window: int):
         return FDBK(num_params=n, x0=theta0)
     if name == "grk":
         return GRK(num_params=n, x0=theta0)
-    if name == "ours":
-        return OURS(num_params=n, x0=theta0)
     if name == "rk_colscaled":
         return RK_ColScaled(num_params=n, x0=theta0)
     if name == "rk_equi":
         return RK_Equi(num_params=n, x0=theta0)
     if name == "rk_tikh":
         return RK_Tikh(num_params=n, x0=theta0)
+    if name == "rk_equi_tikh":
+        return RK_EquiTikh(num_params=n, x0=theta0)
+    if name == "grk_tikh":
+        return GRK_Tikh(num_params=n, x0=theta0)
+    if name == "tagrk_tikh":
+        return GRK_TailAvg_Tikh(num_params=n, x0=theta0)
+    if name == "tagrk":
+        return GRK_TailAvg(num_params=n, x0=theta0)    
     if name in ("gt", "none"):
         return None
     raise ValueError(f"Unknown estimator: {name}")
-
 
 def make_lqr_around_hover(quad: QuadrotorDynamics) -> Tuple[LQRController, np.ndarray]:
     """Construct an LQR controller about hover and return (controller, ug)."""
@@ -174,7 +182,7 @@ def run_online_estimation(
     estimator_name='ours',
     seed=42,
     window=1,
-    est_freq=20,
+    est_freq=50,
     T_sim=20.0,
     noise="low",
     verbose_ctrl: bool = False,
@@ -189,11 +197,11 @@ def run_online_estimation(
 
     # Initial state
     x_true = np.zeros(13)
-    x_true[0:3] = pos_ref[0] + 0.1 * rng.standard_normal(3)
+    x_true[0:3] = pos_ref[0] + 0.05 * rng.standard_normal(3)
     x_true[3:7] = quad.rptoq(0.02 * rng.standard_normal(3))
     x_true[7:10] = vel_ref[0] + 0.01 * rng.standard_normal(3)
     x_true[10:13] = 0.01 * rng.standard_normal(3)
-    x_meas = apply_noise(x_true, level=noise)
+    x_meas = x_true.copy()
 
     # Randomized payload events
     add_step = 200 #rng.integers(100, 201)
@@ -219,13 +227,22 @@ def run_online_estimation(
     b_snap_list: List[np.ndarray] = []
 
     u = ug.copy()
+    aborted = False
+    abort_step = -1
+    failed = False
+    fail_reason = ""
+
     for k in range(len(t)):
         rg, vg = pos_ref[k], vel_ref[k]
         qg, omgg = np.array([1, 0, 0, 0]), np.zeros(3)
         xg = np.hstack([rg, qg, vg, omgg])
 
+        # ---- early deviation gate (abort counts as failure) ----
         if np.linalg.norm(x_meas[0:3] - rg) > 0.3:
-            print(f"Estimator name {estimator_name}, deviated too far from ref at {k}, aborting.")
+            aborted = True
+            abort_step = k
+            failed = True
+            fail_reason = f"abort_pos_deviation@step_{k}"
             break
 
         x_ref_traj.append(xg.copy())
@@ -312,7 +329,7 @@ def run_online_estimation(
                     print(f"[EST] theta_gt = {theta_gt}")
                     print(f"[EST] theta_est= {theta_est}")
                     print(f"[EST] udpate controller = {gate_param_update(theta_candidate, A_stack, b_stack)}")
-                    print(f"[EST] cond(A) = {np.linalg.cond(A_stack):.4e}")
+                    print(f"[EST] scale cond(A) = {scaled_cond(A_stack):.4e}")
 
                 A_new, B_new = quad.get_linearized_est(xg, ug)
                 lqr.update_linearized_dynamics(A_new, B_new)
@@ -367,9 +384,15 @@ def run_online_estimation(
         "b_snapshots":    b_snapshots,
     }
 
+def scaled_cond(A):
+    """Scaled condition number kappa(A) = ||A||_F * ||A^{-1}||_2."""
+    A = np.asarray(A, float)
+    frob_norm = np.linalg.norm(A, 'fro')          # Frobenius norm
+    inv_2norm = np.linalg.norm(np.linalg.inv(A), 2)  # spectral norm of A^{-1}
+    return frob_norm * inv_2norm
 
 if __name__ == "__main__":
-    METHODS = ["grk", "rk", "rls", "kf", "rk_tikh","gt", "rk_equi", "rk_colscaled"]
+    METHODS = ["rk", "grk", "rls", "kf", "rk_tikh","gt", "rk_equi", "rk_colscaled"]
     results = {}
 
     for method in METHODS:
