@@ -688,7 +688,7 @@ def main():
         if args.ecdf_xmax_vel is not None: xmax_per_metric["vel"] = args.ecdf_xmax_vel
         if args.ecdf_xmax_ori is not None: xmax_per_metric["ori"] = args.ecdf_xmax_ori
         if not xmax_per_metric:
-            xmax_per_metric = {"pos": 0.03, "vel": 0.15, "ori": 2.0}
+            xmax_per_metric = {"pos": 0.05, "vel": 0.15, "ori": 2.0}
 
         plot_error_ecdf_fulltraj_allcombined(
             data, outdir, algos=sel_algos,

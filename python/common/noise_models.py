@@ -12,14 +12,14 @@ def apply_noise(x, level="none"):
     if level == "none":
         return x_noisy
     elif level == "low":
+        pos_std = 1e-5
+        vel_std = 1e-6
+    elif level == "medium":
         pos_std = 1e-4
         vel_std = 1e-5
-    elif level == "medium":
+    elif level == "high":
         pos_std = 5e-4
         vel_std = 5e-5
-    elif level == "high":
-        pos_std = 1e-3
-        vel_std = 1e-4
 
     x_noisy[0:3] += np.random.normal(0.0, pos_std, size=3)  # position noise
     x_noisy[7:10] += np.random.normal(0.0, vel_std, size=3)  # velocity noise
