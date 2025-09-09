@@ -260,9 +260,9 @@ def main():
 
         # perturb theta
         if k == event_step:
-            # add drift
-            quad.add_drift(mass_std=1e-3, intertia_std=1e-6, com_std=1e-3)
-            print(f"drift added at t={t[k]:.2f}s, new theta:\n{theta}")
+            wind_vec = np.array([23.5, 10.0, 0.0])
+            quad.aero_added_inertia(wind_vec)
+            print(f"Wind applied at t={t[k]:.2f}s, wind_vec={wind_vec}, new theta:\n{theta}")
 
         # step
         x_true = x_true_next
