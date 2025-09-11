@@ -444,6 +444,8 @@ def run_single_trial(
         "theta_est_traj": theta_est_traj,
         "A_snapshots":    A_snapshots,
         "b_snapshots":    b_snapshots,
+        "seed_offset": int(seed_offset),
+        "rng_seed": int(rng),
     }
 
 # --------------------------- worker wrapper ---------------------------
@@ -557,6 +559,8 @@ def main():
                         else:
                             successes += 1
                         pbar.update(1)
+                    results = sorted(results, key=lambda r: r["seed_offset"])
+
             else:
                 results = []
                 with tqdm(total=N_TRIAL, desc=desc) as pbar:
