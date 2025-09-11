@@ -241,15 +241,15 @@ def run_single_trial(
 
     # Initial state
     x_true = np.zeros(13)
-    x_true[0:3] = pos_ref[0] + 0.1 * rng.standard_normal(3)
+    x_true[0:3] = pos_ref[0] + 0.05 * rng.standard_normal(3)
     x_true[3:7] = quad.rptoq(0.02 * rng.standard_normal(3))
     x_true[7:10] = vel_ref[0] + 0.01 * rng.standard_normal(3)
     x_true[10:13] = 0.01 * rng.standard_normal(3)
     x_meas = x_true.copy()
 
     # Randomized payload events
-    add_step = rng.integers(200, 301)
-    drop_step = rng.integers(600, 701)
+    add_step = rng.integers(300, 401)
+    drop_step = rng.integers(700, 801)
     payload_m = rng.uniform(0.035/3, 0.035/2)
     payload_dr = rng.uniform(-0.001, 0.001, size=3)
 
