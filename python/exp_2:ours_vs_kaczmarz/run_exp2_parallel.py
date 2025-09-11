@@ -275,6 +275,9 @@ def run_single_trial(
     failed = False
     fail_reason = ""
 
+    trial_seed = int(np.asarray(base_seed).item()) + int(np.asarray(seed_offset).item())
+    rng = np.random.default_rng(trial_seed)
+
     try:
         for k in range(len(t)):
             rg, vg = pos_ref[k], vel_ref[k]
@@ -445,7 +448,7 @@ def run_single_trial(
         "A_snapshots":    A_snapshots,
         "b_snapshots":    b_snapshots,
         "seed_offset": int(seed_offset),
-        "rng_seed": int(rng),
+        "rng_seed": trial_seed,
     }
 
 # --------------------------- worker wrapper ---------------------------
