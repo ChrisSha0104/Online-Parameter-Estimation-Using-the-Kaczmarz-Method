@@ -39,7 +39,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empt
 np.set_printoptions(precision=7, suppress=False)
 
 
-ALGOS_DEFAULT: List[str] = ["rls_0.8", "rls_0.5", "rls_0.3", "kf_low", "kf_high", "tagrk"] # "rk", "grk", "tark",  
+ALGOS_DEFAULT: List[str] = ["rls_0.99", "rls_0.96","rls_0.8", "rls_0.5", "rls_0.3", "kf_low", "kf_high", "tagrk"] # "rk", "grk", "tark",  
 REF_CHOICES: List[str] = ["figure8", "circle", "spiral", "ellipse", "helix"] # hover, "lissajous"
 NOISE_LEVELS: List[str] = ["low","medium", "high", "none"] # NOTE: controlled by cli
 NoiseLevel = Literal["high", "medium", "low", "none"]
@@ -138,6 +138,10 @@ def make_estimator(name: str, theta0: np.ndarray, window: int):
     n = int(theta0.shape[0])
     name = name.lower()
 
+    if name == "rls_0.99":
+        return RLS(num_params=n, theta_hat=theta0, forgetting_factor=0.99, c=1000)
+    if name == "rls_0.96":
+        return RLS(num_params=n, theta_hat=theta0, forgetting_factor=0.96, c=1000)
     if name == "rls_0.8":
         return RLS(num_params=n, theta_hat=theta0, forgetting_factor=0.8, c=1000)
     if name == "rls_0.5":

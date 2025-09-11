@@ -147,32 +147,24 @@ from typing import Sequence, Dict, List, Optional
 
 def plot_error_cdfs(
     npz_paths: Sequence[str | Path],
-    algos: Optional[Sequence[str]] = None,   # order of legend; if None, infer from files
-    figsize=(11, 4),
+    algos: Optional[Sequence[str]] = None,   # explicit order; if None, infer from files
+    figsize=(5.0, 4.0),
     title: Optional[str] = None,
-    savepath: Optional[str | Path] = None,
+    save_prefix: Optional[str | Path] = None,  # saves <prefix>_{pos|vel|ori}_cdf.png
+    x_max: float = 0.05,                       # x-axis max for all three plots
 ):
     """
     Plot CDFs of per-trial position/velocity/orientation errors for all algorithms
-    across one or more .npz files (e.g., different noise levels).
+    across one or more .npz files (concatenated across files).
 
-    Assumptions about .npz layout (per your script):
-      - For each algo name `a`, arrays exist:
-          f"{a}__pos"  -> shape (N_trials, T)
-          f"{a}__vel"  -> shape (N_trials, T)
-          f"{a}__ori"  -> shape (N_trials, T)
-        where each row is abs-mean error over time *per timestamp*. We reduce to
-        a single scalar per trial via time nanmean again.
+    Each trial contributes a scalar = nanmean over time of the per-timestep abs-mean error.
 
-    Args:
-        npz_paths: list of result files to include (concatenated).
-        algos: optional explicit list/order of algorithms to show.
-        figsize: matplotlib figure size.
-        title: optional suptitle.
-        savepath: if given, save the figure.
+    Saves three separate figures when `save_prefix` is provided:
+      <prefix>_pos_cdf.png, <prefix>_vel_cdf.png, <prefix>_ori_cdf.png
 
     Returns:
-        fig, axes (axes is [pos_ax, vel_ax, ori_ax])
+      figs: dict with keys {"pos","vel","ori"} -> Figure
+      axes: dict with keys {"pos","vel","ori"} -> Axes
     """
     # ---------- load & collect ----------
     data: Dict[str, Dict[str, List[np.ndarray]]] = {}  # algo -> {"pos":[...], "vel":[...], "ori":[...]}
@@ -182,11 +174,9 @@ def plot_error_cdfs(
         with np.load(p, allow_pickle=True) as Z:
             # discover algos if not provided
             file_algos = list(map(str, Z["algos"])) if "algos" in Z else []
-            if not file_algos:  # fallback: infer from keys
-                for k in Z.files:
-                    if k.endswith("__pos"):
-                        file_algos.append(k[:-5])
-                file_algos = sorted(set(file_algos))
+            if not file_algos:
+                # fallback: infer from keys
+                file_algos = sorted({k[:-5] for k in Z.files if k.endswith("__pos")})
             for a in file_algos:
                 pos_k, vel_k, ori_k = f"{a}__pos", f"{a}__vel", f"{a}__ori"
                 if pos_k not in Z.files or vel_k not in Z.files or ori_k not in Z.files:
@@ -206,7 +196,6 @@ def plot_error_cdfs(
         if not stacks:
             return np.array([])
         X = np.concatenate(stacks, axis=0)  # (sum_N, T)
-        # Each trial -> one scalar (time-averaged absolute error)
         with np.errstate(invalid="ignore", divide="ignore"):
             scalars = np.nanmean(X, axis=1)  # (sum_N,)
         scalars = scalars[~np.isnan(scalars)]
@@ -221,33 +210,52 @@ def plot_error_cdfs(
         for a in algos
     }
 
-    # ---------- color map (consistent across plots) ----------
-    # Use a fixed palette; extend if many algos
+    # ---------- fixed color map (consistent across all three figures) ----------
     base_colors = plt.get_cmap("tab10").colors + plt.get_cmap("tab20").colors
     color_map = {a: base_colors[i % len(base_colors)] for i, a in enumerate(algos)}
 
-    # ---------- small helper to draw a CDF subplot ----------
-    def add_cdf(ax, field: str, xlabel: str):
+    def make_single_cdf(field: str, xlabel: str):
+        fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
         for a in algos:
             x = scalars_by_algo[a][field]
             if x.size == 0:
                 continue
             x_sorted = np.sort(x)
-            y = np.linspace(0, 100, len(x_sorted), endpoint=True)  # percent of trials
+            y = np.linspace(0, 100, len(x_sorted), endpoint=True)
             ax.plot(x_sorted, y, label=a, color=color_map[a], linewidth=1.8)
         ax.set_xlabel(xlabel)
         ax.set_ylabel("% of trials ≤ x")
         ax.grid(True, linestyle=":", linewidth=0.7)
+        ax.set_xlim(left=0.0, right=x_max)
+        if title:
+            ax.set_title(title)
+        ax.legend(title="Algorithm", fontsize=9)
+        return fig, ax
 
-    # ---------- plot ----------
-    fig, axes = plt.subplots(1, 3, figsize=figsize, constrained_layout=True)
-    add_cdf(axes[0], "pos", "Position error")
-    add_cdf(axes[1], "vel", "Velocity error")
-    add_cdf(axes[2], "ori", "Orientation error")
-    axes[0].legend(title="Algorithm", fontsize=9)
-    if title:
-        fig.suptitle(title)
+    figs, axes = {}, {}
+    figs["pos"], axes["pos"] = make_single_cdf("pos", "Position error")
+    figs["vel"], axes["vel"] = make_single_cdf("vel", "Velocity error")
+    figs["ori"], axes["ori"] = make_single_cdf("ori", "Orientation error")
 
-    if savepath is not None:
-        fig.savefig(savepath, dpi=200)
-    return fig, axes
+    if save_prefix is not None:
+        base = Path(save_prefix)
+        figs["pos"].savefig(base.with_name(f"{base.stem}_pos_cdf.png"), dpi=200)
+        figs["vel"].savefig(base.with_name(f"{base.stem}_vel_cdf.png"), dpi=200)
+        figs["ori"].savefig(base.with_name(f"{base.stem}_ori_cdf.png"), dpi=200)
+
+    return figs, axes
+
+
+
+if __name__ == "__main__":
+    plot_error_cdfs(
+        npz_paths=[
+            "paper_plots/exp1/high_noise/results.npz",
+            "paper_plots/exp1/medium_noise/results.npz",
+            "paper_plots/exp1/low_noise/results.npz",
+        ],
+        algos=None,
+        figsize=(11, 4),
+        title="Payload trials: end2end performance error CDFs",
+        save_prefix="paper_plots/exp1/",
+    )
