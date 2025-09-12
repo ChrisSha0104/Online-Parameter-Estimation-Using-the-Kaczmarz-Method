@@ -39,7 +39,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empt
 np.set_printoptions(precision=7, suppress=False)
 
 
-ALGOS_DEFAULT: List[str] = ["tagrk", "tagrk_5", "tagrk_10","tagrk_15", "rk", "grk", "tark"] # "rk", "grk", "tark",
+ALGOS_DEFAULT: List[str] = ["tagrk", "tagrk_5", "tagrk_10", "tagrk_15", "tagrk_20", "tagrk_25", "rk", "grk", "tark"] # "rk", "grk", "tark",
 REF_CHOICES: List[str] = ["figure8", "circle", "spiral", "ellipse", "helix"] # hover, "lissajous"
 NOISE_LEVELS: List[str] = ["low","medium", "high", "none"] # NOTE: controlled by cli
 NoiseLevel = Literal["high", "medium", "low", "none"]
@@ -192,6 +192,10 @@ def make_estimator(name: str, theta0: np.ndarray, window: int):
         return GRK_TailAvg(num_params=n, x0=theta0, burnin=10)
     if name == "tagrk_15":
         return GRK_TailAvg(num_params=n, x0=theta0, burnin=15)
+    if name == "tagrk_20":
+        return GRK_TailAvg(num_params=n, x0=theta0, burnin=20)
+    if name == "tagrk_25":
+        return GRK_TailAvg(num_params=n, x0=theta0, burnin=25)
     if name in ("gt", "none"):
         return None
     raise ValueError(f"Unknown estimator: {name}")
@@ -500,7 +504,7 @@ def main():
     ap.add_argument("--est_freq", type=int, default=20)
     ap.add_argument("--window", type=int, default=1)
     ap.add_argument("--save_traj", action="store_true")
-    ap.add_argument("--workers", type=int, default=4,
+    ap.add_argument("--workers", type=int, default=8,
                     help="If >0, use ProcessPoolExecutor with this many workers.")
 
     args = ap.parse_args()

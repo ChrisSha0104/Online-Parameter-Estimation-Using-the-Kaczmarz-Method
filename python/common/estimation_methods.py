@@ -500,7 +500,7 @@ class GRK_TailAvg:
                 b: np.ndarray,
                 l: int | None = None,
                 x0: np.ndarray | None = None,
-                tol: float = 1e-10,
+                tol: float = 0.0,
                 rng: np.random.Generator | None = None) -> np.ndarray:
         A = np.asarray(A, float)
         b = np.asarray(b, float).reshape(-1)
@@ -569,7 +569,7 @@ class GRK_TailAvg:
                 count += 1
 
         x_avg = x_sum / max(count, 1)
-        self.x0 = x
+        self.x0 = x_avg
         return x_avg
 
 
