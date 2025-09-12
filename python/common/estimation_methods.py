@@ -490,18 +490,18 @@ class GRK_TailAvg:
       tail_frac: fraction in (0,1], e.g. 0.5 averages the last 50% of steps
       num_passes: how many (m*n) inner iterations
     """
-    def __init__(self, num_params: int, x0: np.ndarray | None = None):
+    def __init__(self, num_params: int, x0: np.ndarray | None = None, burnin: int = 0):
         self.num_params = int(num_params)
         self.x0 = np.zeros(self.num_params) if x0 is None else np.asarray(x0, float).reshape(-1)
+        self.burnin = burnin
 
     def iterate(self,
                 A: np.ndarray,
                 b: np.ndarray,
                 l: int | None = None,
                 x0: np.ndarray | None = None,
-                tol: float = 0.0,
-                rng: np.random.Generator | None = None,
-                burnin: int = 0) -> np.ndarray:
+                tol: float = 1e-10,
+                rng: np.random.Generator | None = None) -> np.ndarray:
         A = np.asarray(A, float)
         b = np.asarray(b, float).reshape(-1)
         m, n = A.shape
@@ -564,7 +564,7 @@ class GRK_TailAvg:
             res_i = b[i_k] - float(ai @ x)
             x = x + (res_i / den_safe) * ai
 
-            if ss >= burnin:
+            if ss >= self.burnin:
                 x_sum += x
                 count += 1
 
